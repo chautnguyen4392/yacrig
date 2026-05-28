@@ -17,12 +17,15 @@
  */
 
 #include <cassert>
+#include <cinttypes>
 #include <thread>
 #include <mutex>
 
 
 #include "backend/cpu/Cpu.h"
 #include "backend/cpu/CpuWorker.h"
+#include "backend/cpu/CpuLaunchData.h"
+#include "base/io/log/Log.h"
 #include "base/tools/Alignment.h"
 #include "base/tools/Chrono.h"
 #include "core/config/Config.h"
@@ -42,6 +45,13 @@
 
 #ifdef XMRIG_ALGO_RANDOMX
 #   include "crypto/randomx/randomx.h"
+#endif
+
+
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "crypto/scrypt-chacha/scrypt-chacha.h"
+#   include "crypto/scrypt-chacha/scrypt-chacha_test.h"
+#   include "crypto/scrypt-chacha/ScryptChachaCtx.h"
 #endif
 
 
@@ -76,26 +86,44 @@ xmrig::CpuWorker<N>::CpuWorker(size_t id, const CpuLaunchData &data) :
     m_threads(data.threads),
     m_ctx()
 {
-#   ifdef XMRIG_ALGO_CN_HEAVY
-    // cn-heavy optimization for Zen3 CPUs
-    const auto arch = Cpu::info()->arch();
-    const uint32_t model = Cpu::info()->model();
-    const bool is_vermeer = (arch == ICpuInfo::ARCH_ZEN3) && (model == 0x21);
-    const bool is_raphael = (arch == ICpuInfo::ARCH_ZEN4) && (model == 0x61);
-    if ((N == 1) && (m_av == CnHash::AV_SINGLE) && (m_algorithm.family() == Algorithm::CN_HEAVY) && (m_assembly != Assembly::NONE) && (is_vermeer || is_raphael)) {
-        std::lock_guard<std::mutex> lock(cn_heavyZen3MemoryMutex);
-        if (!cn_heavyZen3Memory) {
-            // Round up number of threads to the multiple of 8
-            const size_t num_threads = ((m_threads + 7) / 8) * 8;
-            cn_heavyZen3Memory = new VirtualMemory(m_algorithm.l3() * num_threads, data.hugePages, false, false, node(), VirtualMemory::kDefaultHugePageSize);
-        }
-        m_memory = cn_heavyZen3Memory;
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    if (m_algorithm.family() == Algorithm::SCRYPT_CHACHA) {
+        // Per-worker, huge-page-aware 512 MiB region. usePool=false because
+        // the shared MemoryPool is sized for CN-class (2 MiB) scratchpads.
+        m_memory = new VirtualMemory(scrypt_chacha::kScratchpadBytes,
+                                     data.hugePages,
+                                     /*oneGbPages=*/false,
+                                     /*usePool=*/false,
+                                     node(),
+                                     VirtualMemory::kDefaultHugePageSize);
     }
     else
 #   endif
+#   ifdef XMRIG_ALGO_CN_HEAVY
+    // cn-heavy optimization for Zen3 CPUs
+    {
+        const auto arch = Cpu::info()->arch();
+        const uint32_t model = Cpu::info()->model();
+        const bool is_vermeer = (arch == ICpuInfo::ARCH_ZEN3) && (model == 0x21);
+        const bool is_raphael = (arch == ICpuInfo::ARCH_ZEN4) && (model == 0x61);
+        if ((N == 1) && (m_av == CnHash::AV_SINGLE) && (m_algorithm.family() == Algorithm::CN_HEAVY) && (m_assembly != Assembly::NONE) && (is_vermeer || is_raphael)) {
+            std::lock_guard<std::mutex> lock(cn_heavyZen3MemoryMutex);
+            if (!cn_heavyZen3Memory) {
+                // Round up number of threads to the multiple of 8
+                const size_t num_threads = ((m_threads + 7) / 8) * 8;
+                cn_heavyZen3Memory = new VirtualMemory(m_algorithm.l3() * num_threads, data.hugePages, false, false, node(), VirtualMemory::kDefaultHugePageSize);
+            }
+            m_memory = cn_heavyZen3Memory;
+        }
+        else {
+            m_memory = new VirtualMemory(m_algorithm.l3() * N, data.hugePages, false, true, node(), VirtualMemory::kDefaultHugePageSize);
+        }
+    }
+#   else
     {
         m_memory = new VirtualMemory(m_algorithm.l3() * N, data.hugePages, false, true, node(), VirtualMemory::kDefaultHugePageSize);
     }
+#   endif
 
 #   ifdef XMRIG_ALGO_GHOSTRIDER
     m_ghHelper = ghostrider::create_helper_thread(affinity(), data.priority, data.affinities);
@@ -111,6 +139,15 @@ xmrig::CpuWorker<N>::~CpuWorker()
 #   endif
 
     CnCtx::release(m_ctx, N);
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    for (size_t i = 0; i < N; ++i) {
+        if (m_scryptCtx[i]) {
+            scrypt_chacha::releaseCtx(m_scryptCtx[i]);
+            m_scryptCtx[i] = nullptr;
+        }
+    }
+#   endif
 
 #   ifdef XMRIG_ALGO_CN_HEAVY
     if (m_memory != cn_heavyZen3Memory)
@@ -161,6 +198,29 @@ bool xmrig::CpuWorker<N>::selfTest()
 #   ifdef XMRIG_ALGO_RANDOMX
     if (m_algorithm.family() == Algorithm::RANDOM_X) {
         return N == 1;
+    }
+#   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    if (m_algorithm.family() == Algorithm::SCRYPT_CHACHA) {
+        allocateScryptChachaCtx();
+        if (!m_scryptCtx[0]) {
+            return false;
+        }
+
+        // Hash the first golden vector and compare. The kernel emits little-endian
+        // wire bytes; kTestVectors[].hash is in big-endian display order — the same
+        // convention tests/scrypt_chacha_test.cpp documents — so byte-reverse before
+        // memcmp.
+        const auto &v = scrypt_chacha::kTestVectors[0];
+        uint8_t out[scrypt_chacha::kOutputSize] = {};
+        scrypt_chacha::hash(v.header, sizeof(v.header), out, m_scryptCtx[0], 0);
+
+        uint8_t out_be[scrypt_chacha::kOutputSize];
+        for (size_t b = 0; b < scrypt_chacha::kOutputSize; ++b) {
+            out_be[b] = out[scrypt_chacha::kOutputSize - 1 - b];
+        }
+        return memcmp(out_be, v.hash, scrypt_chacha::kOutputSize) == 0;
     }
 #   endif
 
@@ -325,6 +385,18 @@ void xmrig::CpuWorker<N>::start()
                     break;
 #               endif
 
+#               ifdef XMRIG_ALGO_SCRYPT_CHACHA
+                case Algorithm::SCRYPT_CHACHA:
+                    for (size_t i = 0; i < N; ++i) {
+                        scrypt_chacha::hash(m_job.blob() + i * job.size(),
+                                            job.size(),
+                                            m_hash + i * scrypt_chacha::kOutputSize,
+                                            m_scryptCtx[i],
+                                            job.height());
+                    }
+                    break;
+#               endif
+
                 default:
                     fn(job.algorithm())(m_job.blob(), job.size(), m_hash, m_ctx, job.height());
                     break;
@@ -344,12 +416,49 @@ void xmrig::CpuWorker<N>::start()
                         if (current_job_nonces[i] < m_benchSize) {
                             BenchState::add(value);
                         }
+                        continue;
                     }
-                    else
 #                   endif
-                    if (value < job.target()) {
-                        JobResults::submit(job, current_job_nonces[i], m_hash + (i * 32), job.hasMinerSignature() ? miner_signature_saved : nullptr);
+
+                    if (value >= job.target()) {
+                        continue;                                       // cheap reject (CN + scrypt-chacha)
                     }
+
+#                   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+                    if (job.algorithm().family() == Algorithm::SCRYPT_CHACHA) {
+                        // Full 32-byte target compare. Hash and target are both
+                        // little-endian wire bytes, so the high-order byte is at
+                        // index 31; walk down from there.
+                        const uint8_t *raw_target = job.rawTarget32();
+                        const uint8_t *hash       = m_hash + (i * 32);
+
+                        LOG_DEBUG("cpu: scrypt-chacha prefilter passed, full 32B compare:"
+                                  " nonce=0x%08x (%u) prefilter_value=%016" PRIx64
+                                  " job_target=%016" PRIx64,
+                                  current_job_nonces[i],
+                                  current_job_nonces[i],
+                                  value, job.target());
+
+                        bool ok = true;
+                        for (int b = 31; b >= 0; --b) {
+                            if (hash[b] < raw_target[b]) break;
+                            if (hash[b] > raw_target[b]) { ok = false; break; }
+                        }
+                        if (!ok) {
+                            LOG_DEBUG("cpu: scrypt-chacha full target compare rejected"
+                                      " (prefilter false positive) nonce=0x%08x (%u)",
+                                      current_job_nonces[i], current_job_nonces[i]);
+                            continue;
+                        }
+
+                        LOG_INFO("%s " GREEN_BOLD("scrypt-chacha share found")
+                                    " nonce=0x%08x (%u) job_id=%s",
+                                    CpuLaunchData::tag(), current_job_nonces[i], current_job_nonces[i], job.id().data());
+                    }
+#                   endif
+
+                    JobResults::submit(job, current_job_nonces[i], m_hash + (i * 32),
+                                       job.hasMinerSignature() ? miner_signature_saved : nullptr);
                 }
                 m_count += N;
             }
@@ -498,6 +607,22 @@ void xmrig::CpuWorker<N>::allocateCnCtx()
 }
 
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+template<size_t N>
+void xmrig::CpuWorker<N>::allocateScryptChachaCtx()
+{
+    for (size_t i = 0; i < N; ++i) {
+        if (m_scryptCtx[i] == nullptr) {
+            // N is always 1 for our family (clamped by Algorithm::maxIntensity()),
+            // so every lane points at the same scratchpad. Loop kept for
+            // symmetry with CnCtx::create.
+            m_scryptCtx[i] = scrypt_chacha::createCtx(m_memory->scratchpad());
+        }
+    }
+}
+#endif
+
+
 template<size_t N>
 void xmrig::CpuWorker<N>::consumeJob()
 {
@@ -519,6 +644,12 @@ void xmrig::CpuWorker<N>::consumeJob()
 #   ifdef XMRIG_ALGO_RANDOMX
     if (m_job.currentJob().algorithm().family() == Algorithm::RANDOM_X) {
         allocateRandomX_VM();
+    }
+    else
+#   endif
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    if (m_job.currentJob().algorithm().family() == Algorithm::SCRYPT_CHACHA) {
+        allocateScryptChachaCtx();
     }
     else
 #   endif

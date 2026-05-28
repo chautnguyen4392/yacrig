@@ -48,6 +48,11 @@
 #endif
 
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "crypto/scrypt-chacha/scrypt-chacha.h"
+#endif
+
+
 #ifdef XMRIG_FEATURE_BENCHMARK
 #   include "backend/common/benchmark/Benchmark.h"
 #   include "backend/common/benchmark/BenchState.h"
@@ -144,15 +149,37 @@ public:
 
     inline void start()
     {
-        LOG_INFO("%s use profile " BLUE_BG(WHITE_BOLD_S " %s ") WHITE_BOLD_S " (" CYAN_BOLD("%zu") WHITE_BOLD(" thread%s)") " scratchpad " CYAN_BOLD("%zu KB"),
-                 Tags::cpu(),
-                 profileName.data(),
-                 threads.size(),
-                 threads.size() > 1 ? "s" : "",
-                 algo.l3() / 1024
-                 );
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        if (algo.family() == Algorithm::SCRYPT_CHACHA) {
+            LOG_INFO("%s use profile " BLUE_BG(WHITE_BOLD_S " %s ") WHITE_BOLD_S " (" CYAN_BOLD("%zu") WHITE_BOLD(" thread%s)") " scratchpad " CYAN_BOLD("%zu MB"),
+                     Tags::cpu(),
+                     profileName.data(),
+                     threads.size(),
+                     threads.size() > 1 ? "s" : "",
+                     scrypt_chacha::kScratchpadBytes / (1024 * 1024)
+                     );
+        }
+        else
+#       endif
+        {
+            LOG_INFO("%s use profile " BLUE_BG(WHITE_BOLD_S " %s ") WHITE_BOLD_S " (" CYAN_BOLD("%zu") WHITE_BOLD(" thread%s)") " scratchpad " CYAN_BOLD("%zu KB"),
+                     Tags::cpu(),
+                     profileName.data(),
+                     threads.size(),
+                     threads.size() > 1 ? "s" : "",
+                     algo.l3() / 1024
+                     );
+        }
 
-        status.start(threads, algo.l3());
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        const size_t mem_per_way = (algo.family() == Algorithm::SCRYPT_CHACHA)
+                                   ? scrypt_chacha::kScratchpadBytes
+                                   : algo.l3();
+#       else
+        const size_t mem_per_way = algo.l3();
+#       endif
+
+        status.start(threads, mem_per_way);
 
 #       ifdef XMRIG_FEATURE_BENCHMARK
         workers.start(threads, benchmark);

@@ -101,6 +101,11 @@ const char* Algorithm::kGHOSTRIDER      = "ghostrider";
 const char* Algorithm::kGHOSTRIDER_RTM  = "ghostrider";
 #endif
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+const char *Algorithm::kSCRYPT_CHACHA       = "scrypt-chacha";
+const char *Algorithm::kSCRYPT_CHACHA_YAC   = "scrypt-chacha";
+#endif
+
 
 #define ALGO_NAME(ALGO)         { Algorithm::ALGO, Algorithm::k##ALGO }
 #define ALGO_ALIAS(ALGO, NAME)  { NAME, Algorithm::ALGO }
@@ -162,6 +167,10 @@ static const std::map<uint32_t, const char *> kAlgorithmNames = {
 
 #   ifdef XMRIG_ALGO_GHOSTRIDER
     ALGO_NAME(GHOSTRIDER_RTM),
+#   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    ALGO_NAME(SCRYPT_CHACHA_YAC),
 #   endif
 };
 
@@ -279,6 +288,13 @@ static const std::map<const char *, Algorithm::Id, aliasCompare> kAlgorithmAlias
     ALGO_ALIAS_AUTO(GHOSTRIDER_RTM), ALGO_ALIAS(GHOSTRIDER_RTM, "ghostrider/rtm"),
                                      ALGO_ALIAS(GHOSTRIDER_RTM, "gr"),
 #   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    ALGO_ALIAS_AUTO(SCRYPT_CHACHA_YAC), ALGO_ALIAS(SCRYPT_CHACHA_YAC, "scrypt-jane"),
+                                        ALGO_ALIAS(SCRYPT_CHACHA_YAC, "scrypt-chacha/yac"),
+                                        ALGO_ALIAS(SCRYPT_CHACHA_YAC, "yac"),
+                                        ALGO_ALIAS(SCRYPT_CHACHA_YAC, "yacoin"),
+#   endif
 };
 
 
@@ -353,7 +369,8 @@ std::vector<xmrig::Algorithm> xmrig::Algorithm::all(const std::function<bool(con
         RX_0, RX_WOW, RX_ARQ, RX_GRAFT, RX_SFX, RX_YADA,
         AR2_CHUKWA, AR2_CHUKWA_V2, AR2_WRKZ,
         KAWPOW_RVN,
-        GHOSTRIDER_RTM
+        GHOSTRIDER_RTM,
+        SCRYPT_CHACHA_YAC
     };
 
     Algorithms out;

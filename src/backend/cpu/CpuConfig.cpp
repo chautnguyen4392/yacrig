@@ -35,6 +35,7 @@ const char *CpuConfig::kHwAes               = "hw-aes";
 const char *CpuConfig::kMaxThreadsHint      = "max-threads-hint";
 const char *CpuConfig::kMemoryPool          = "memory-pool";
 const char *CpuConfig::kPriority            = "priority";
+const char *CpuConfig::kReserveRam          = "reserve-ram";
 const char *CpuConfig::kYield               = "yield";
 
 #ifdef XMRIG_FEATURE_ASM
@@ -70,6 +71,7 @@ rapidjson::Value xmrig::CpuConfig::toJSON(rapidjson::Document &doc) const
     obj.AddMember(StringRef(kHwAes),        m_aes == AES_AUTO ? Value(kNullType) : Value(m_aes == AES_HW), allocator);
     obj.AddMember(StringRef(kPriority),     priority() != -1 ? Value(priority()) : Value(kNullType), allocator);
     obj.AddMember(StringRef(kMemoryPool),   m_memoryPool < 1 ? Value(m_memoryPool < 0) : Value(m_memoryPool), allocator);
+    obj.AddMember(StringRef(kReserveRam),   m_reserveRam, allocator);
     obj.AddMember(StringRef(kYield),        m_yield, allocator);
 
     if (m_threads.isEmpty()) {
@@ -133,6 +135,7 @@ void xmrig::CpuConfig::read(const rapidjson::Value &value)
         m_enabled      = Json::getBool(value, kEnabled, m_enabled);
         m_hugePagesJit = Json::getBool(value, kHugePagesJit, m_hugePagesJit);
         m_limit        = Json::getUint(value, kMaxThreadsHint, m_limit);
+        m_reserveRam   = Json::getUint(value, kReserveRam, m_reserveRam);
         m_yield        = Json::getBool(value, kYield, m_yield);
 
         setAesMode(Json::getValue(value, kHwAes));
@@ -179,6 +182,9 @@ void xmrig::CpuConfig::generate()
     count += xmrig::generate<Algorithm::RANDOM_X>(m_threads, m_limit);
     count += xmrig::generate<Algorithm::ARGON2>(m_threads, m_limit);
     count += xmrig::generate<Algorithm::GHOSTRIDER>(m_threads, m_limit);
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    count += xmrig::generate_scrypt_chacha(m_threads, m_limit, isHugePages(), reserveRam());
+#   endif
 
     m_shouldSave |= count > 0;
 }

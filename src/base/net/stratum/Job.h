@@ -65,6 +65,15 @@ public:
     void setDiff(uint64_t diff);
     void setSigKey(const char *sig_key);
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // 32-byte little-endian target for YAC scrypt-chacha (set by YacGetworkClient).
+    // Distinct from the proxy-mode hex-string m_rawTarget below; only ever populated
+    // when family == SCRYPT_CHACHA. Workers read it in CpuWorker::start() for the
+    // full byte-by-byte target compare.
+    inline const uint8_t *rawTarget32() const           { return m_rawTarget32; }
+    void setRawTarget32(const uint8_t *target);
+#   endif
+
     inline bool isNicehash() const                      { return m_nicehash; }
     inline bool isValid() const                         { return (m_size > 0 && m_diff > 0) || !m_poolWallet.isEmpty(); }
     inline bool setId(const char *id)                   { return (m_id = id); }
@@ -161,6 +170,10 @@ private:
     uint64_t m_target   = 0;
     uint8_t m_blob[kMaxBlobSize]{ 0 };
     uint8_t m_index     = 0;
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    uint8_t m_rawTarget32[32]{};
+#   endif
 
 #   ifdef XMRIG_PROXY_PROJECT
     char m_rawBlob[kMaxBlobSize * 2 + 8]{};

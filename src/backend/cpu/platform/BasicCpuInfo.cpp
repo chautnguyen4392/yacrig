@@ -323,8 +323,10 @@ const char *xmrig::BasicCpuInfo::backend() const
 }
 
 
-xmrig::CpuThreads xmrig::BasicCpuInfo::threads(const Algorithm &algorithm, uint32_t) const
+xmrig::CpuThreads xmrig::BasicCpuInfo::threads(const Algorithm &algorithm, uint32_t limit) const
 {
+    (void)limit;
+
     const size_t count = std::thread::hardware_concurrency();
 
     if (count == 1) {

@@ -24,6 +24,10 @@
 #include "backend/cpu/Cpu.h"
 #include "backend/cpu/CpuThreads.h"
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "crypto/scrypt-chacha/Autotune.h"
+#endif
+
 
 namespace xmrig {
 
@@ -147,6 +151,21 @@ template<>
 size_t inline generate<Algorithm::GHOSTRIDER>(Threads<CpuThreads>& threads, uint32_t limit)
 {
     return generate(Algorithm::kGHOSTRIDER, threads, Algorithm::GHOSTRIDER_RTM, limit);
+}
+#endif
+
+
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+static inline size_t generate_scrypt_chacha(Threads<CpuThreads> &threads, uint32_t limit,
+                                            bool hugePages, uint32_t reserveMb)
+{
+    if (threads.isExist(Algorithm::SCRYPT_CHACHA_YAC) || threads.has(Algorithm::kSCRYPT_CHACHA)) {
+        return 0;
+    }
+
+    return threads.move(Algorithm::kSCRYPT_CHACHA,
+                        scrypt_chacha::autotune(Algorithm::SCRYPT_CHACHA_YAC, Cpu::info(),
+                                                limit, hugePages, reserveMb));
 }
 #endif
 

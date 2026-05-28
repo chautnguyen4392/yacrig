@@ -73,10 +73,26 @@ bool xmrig::Pools::isEqual(const Pools &other) const
 int xmrig::Pools::donateLevel() const
 {
 #   ifdef XMRIG_FEATURE_BENCHMARK
-    return benchSize() || (m_benchmark && !m_benchmark->id().isEmpty()) ? 0 : m_donateLevel;
-#   else
-    return m_donateLevel;
+    if (benchSize() || (m_benchmark && !m_benchmark->id().isEmpty())) {
+        return 0;
+    }
 #   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // The built-in dev donation pool speaks Stratum for the original XMRig
+    // algorithm family (CryptoNight / RandomX / KawPow / GhostRider). It does
+    // not accept YAC scrypt-chacha `getwork` shares. Force the donate level to
+    // zero whenever any configured pool targets YAC, so we don't periodically
+    // route a fraction of YAC hashes to a pool that can't accept them.
+    // The startup banner therefore always shows `DONATE 0%` on a YAC setup.
+    for (const Pool &pool : m_data) {
+        if (pool.coin() == Coin::YAC) {
+            return 0;
+        }
+    }
+#   endif
+
+    return m_donateLevel;
 }
 
 

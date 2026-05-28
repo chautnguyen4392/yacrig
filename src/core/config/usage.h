@@ -41,7 +41,7 @@ static inline const std::string &usage()
 
     u += "Usage: " APP_ID " [OPTIONS]\n\nNetwork:\n";
     u += "  -o, --url=URL                 URL of mining server\n";
-    u += "  -a, --algo=ALGO               mining algorithm https://xmrig.com/docs/algorithms\n";
+    u += "  -a, --algo=ALGO               mining algorithm\n";
     u += "      --coin=COIN               specify coin instead of algorithm\n";
     u += "  -u, --user=USERNAME           username for mining server\n";
     u += "  -p, --pass=PASSWORD           password for mining server\n";
@@ -63,7 +63,7 @@ static inline const std::string &usage()
 #   ifdef XMRIG_FEATURE_HTTP
     u += "      --daemon                  use daemon RPC instead of pool for solo mining\n";
     u += "      --daemon-zmq-port=N       daemon's zmq-pub port number (only use it if daemon has it enabled)\n";
-    u += "      --daemon-poll-interval=N  daemon poll interval in milliseconds (default: 1000)\n";
+    u += "      --daemon-poll-interval=N  daemon poll interval in milliseconds (default: 10000)\n";
     u += "      --daemon-job-timeout=N    daemon job timeout in milliseconds (default: 15000)\n";
     u += "      --self-select=URL         self-select block templates from URL\n";
     u += "      --submit-to-origin        also submit solution back to self-select URL\n";
@@ -84,6 +84,7 @@ static inline const std::string &usage()
     u += "      --cpu-priority=N          set process priority (0 idle, 2 normal to 5 highest)\n";
     u += "      --cpu-max-threads-hint=N  maximum CPU threads count (in percentage) hint for autoconfig\n";
     u += "      --cpu-memory-pool=N       number of 2 MB pages for persistent memory pool, -1 (auto), 0 (disable)\n";
+    u += "      --reserve-ram=N           RAM (MiB) the autotuner leaves untouched for OS and other processes (default 2048)\n";
     u += "      --cpu-no-yield            prefer maximum hashrate rather than system response/stability\n";
     u += "      --no-huge-pages           disable huge pages support\n";
 #   ifdef XMRIG_OS_LINUX
@@ -197,6 +198,10 @@ static inline const std::string &usage()
 
 #   ifdef XMRIG_FEATURE_DMI
     u += "      --no-dmi                  disable DMI/SMBIOS reader\n";
+#   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    u += "      --scrypt-chacha-test      run the scrypt-chacha golden-vector self-test and exit\n";
 #   endif
 
     return u;

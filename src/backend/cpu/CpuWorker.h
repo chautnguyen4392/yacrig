@@ -43,6 +43,11 @@ namespace ghostrider { struct HelperThread; }
 #endif
 
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+namespace scrypt_chacha { struct ScryptChachaCtx; }
+#endif
+
+
 template<size_t N>
 class CpuWorker : public Worker
 {
@@ -77,6 +82,10 @@ private:
     void allocateRandomX_VM();
 #   endif
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    void allocateScryptChachaCtx();
+#   endif
+
     bool nextRound();
     bool verify(const Algorithm &algorithm, const uint8_t *referenceValue);
     bool verify2(const Algorithm &algorithm, const uint8_t *referenceValue);
@@ -94,6 +103,10 @@ private:
     cryptonight_ctx *m_ctx[N];
     VirtualMemory *m_memory = nullptr;
     WorkerJob<N> m_job;
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    scrypt_chacha::ScryptChachaCtx *m_scryptCtx[N] = {};
+#   endif
 
 #   ifdef XMRIG_ALGO_RANDOMX
     randomx_vm *m_vm        = nullptr;

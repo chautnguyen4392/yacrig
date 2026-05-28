@@ -46,6 +46,7 @@ public:
     static const char *kMaxThreadsHint;
     static const char *kMemoryPool;
     static const char *kPriority;
+    static const char *kReserveRam;
     static const char *kYield;
 
 #   ifdef XMRIG_FEATURE_ASM
@@ -75,6 +76,7 @@ public:
     inline int priority() const                         { return m_priority; }
     inline size_t hugePageSize() const                  { return m_hugePageSize * 1024U; }
     inline uint32_t limit() const                       { return m_limit; }
+    inline uint32_t reserveRam() const                  { return m_reserveRam; }
 
 private:
     constexpr static size_t kDefaultHugePageSizeKb  = 2048U;
@@ -99,6 +101,7 @@ private:
     String m_argon2Impl;
     Threads<CpuThreads> m_threads;
     uint32_t m_limit        = 100;
+    uint32_t m_reserveRam   = 2048;
 };
 
 

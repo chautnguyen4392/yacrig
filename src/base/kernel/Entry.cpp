@@ -44,6 +44,15 @@
 #include "version.h"
 
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "crypto/scrypt-chacha/ScryptChachaCtx.h"
+#   include "crypto/scrypt-chacha/scrypt-chacha.h"
+#   include "crypto/scrypt-chacha/scrypt-chacha_test.h"
+#   include <cstdlib>
+#   include <cstring>
+#endif
+
+
 namespace xmrig {
 
 
@@ -102,6 +111,77 @@ static int showVersion()
 }
 
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+/* Standalone golden-vector check for the scrypt-chacha CPU kernel. Mirrors
+ * tests/scrypt_chacha_test.cpp but runs from the main xmrig binary so users
+ * can validate the kernel on the host without building a separate executable.
+ * Allocates ~512 MiB transiently and exits — never returns to the App path. */
+static int runScryptChachaTest()
+{
+    using xmrig::scrypt_chacha::createCtx;
+    using xmrig::scrypt_chacha::hash;
+    using xmrig::scrypt_chacha::kOutputSize;
+    using xmrig::scrypt_chacha::kScratchpadBytes;
+    using xmrig::scrypt_chacha::kTestVectorCount;
+    using xmrig::scrypt_chacha::kTestVectors;
+    using xmrig::scrypt_chacha::releaseCtx;
+
+    void *scratchpad = nullptr;
+    if (posix_memalign(&scratchpad, 64, kScratchpadBytes) != 0) {
+        std::fprintf(stderr, "scrypt-chacha-test: failed to allocate scratchpad (need ~512 MiB)\n");
+        return 1;
+    }
+
+    auto *ctx = createCtx(static_cast<uint8_t *>(scratchpad));
+    if (!ctx) {
+        std::fprintf(stderr, "scrypt-chacha-test: createCtx failed\n");
+        std::free(scratchpad);
+        return 1;
+    }
+
+    int failed = 0;
+
+    for (size_t i = 0; i < kTestVectorCount; i++) {
+        const auto &v = kTestVectors[i];
+        uint8_t out[kOutputSize] = {};
+
+        hash(v.header, sizeof(v.header), out, ctx, 0);
+
+        /* Kernel emits little-endian wire bytes; golden vector is in big-endian
+         * display order. Reverse before comparing. */
+        uint8_t out_be[kOutputSize];
+        for (size_t b = 0; b < kOutputSize; b++) {
+            out_be[b] = out[kOutputSize - 1 - b];
+        }
+
+        const bool ok = (std::memcmp(out_be, v.hash, kOutputSize) == 0);
+        std::printf("vector %zu: %s\n", i + 1, ok ? "OK" : "FAIL");
+
+        if (!ok) {
+            std::printf("  expected: ");
+            for (size_t b = 0; b < kOutputSize; b++) std::printf("%02x", v.hash[b]);
+            std::printf("\n  got:      ");
+            for (size_t b = 0; b < kOutputSize; b++) std::printf("%02x", out_be[b]);
+            std::printf("\n");
+            failed++;
+        }
+    }
+
+    releaseCtx(ctx);
+    std::free(scratchpad);
+
+    if (failed) {
+        std::fprintf(stderr, "scrypt-chacha-test: %d/%zu vector(s) failed\n",
+                     failed, kTestVectorCount);
+        return 1;
+    }
+
+    std::printf("scrypt-chacha-test: all %zu vector(s) passed\n", kTestVectorCount);
+    return 0;
+}
+#endif
+
+
 #ifdef XMRIG_FEATURE_HWLOC
 static int exportTopology(const Process &)
 {
@@ -155,6 +235,12 @@ xmrig::Entry::Id xmrig::Entry::get(const Process &process)
     }
 #   endif
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    if (args.hasArg("--scrypt-chacha-test")) {
+        return ScryptChachaTest;
+    }
+#   endif
+
     return Default;
 }
 
@@ -180,6 +266,11 @@ int xmrig::Entry::exec(const Process &process, Id id)
             OclPlatform::print();
         }
         return 0;
+#   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    case ScryptChachaTest:
+        return runScryptChachaTest();
 #   endif
 
     default:

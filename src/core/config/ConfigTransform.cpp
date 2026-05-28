@@ -144,6 +144,9 @@ void xmrig::ConfigTransform::transform(rapidjson::Document &doc, int key, const 
     case IConfig::MemoryPoolKey: /* --cpu-memory-pool */
         return set(doc, CpuConfig::kField, CpuConfig::kMemoryPool, static_cast<int64_t>(strtol(arg, nullptr, 10)));
 
+    case IConfig::ReserveRamKey: /* --reserve-ram */
+        return set(doc, CpuConfig::kField, CpuConfig::kReserveRam, static_cast<uint64_t>(strtoul(arg, nullptr, 10)));
+
     case IConfig::YieldKey: /* --cpu-no-yield */
         return set(doc, CpuConfig::kField, CpuConfig::kYield, false);
 

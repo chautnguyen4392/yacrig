@@ -224,6 +224,11 @@ if (WITH_HTTP)
         src/base/net/tools/TcpServer.cpp
         )
 
+    if (WITH_SCRYPT_CHACHA)
+        list(APPEND HEADERS_BASE_HTTP src/base/net/stratum/YacGetworkClient.h)
+        list(APPEND SOURCES_BASE_HTTP src/base/net/stratum/YacGetworkClient.cpp)
+    endif()
+
     add_definitions(/DXMRIG_FEATURE_HTTP)
     add_definitions(/DXMRIG_FEATURE_API)
 else()

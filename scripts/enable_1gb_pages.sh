@@ -1,6 +1,6 @@
 #!/bin/sh -e
 
-# https://xmrig.com/docs/miner/hugepages#onegb-huge-pages
+# Enable 1 GiB huge pages for the scratchpad — see RandomX / scrypt-chacha docs.
 
 sysctl -w vm.nr_hugepages=$(nproc)
 

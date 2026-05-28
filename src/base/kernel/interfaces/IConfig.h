@@ -111,6 +111,7 @@ public:
         CPUMaxThreadsKey     = 1026,
         MemoryPoolKey        = 1027,
         YieldKey             = 1030,
+        ReserveRamKey        = 1060,
         Argon2ImplKey        = 1039,
         RandomXCacheQoSKey   = 1040,
 

@@ -10,6 +10,7 @@ option(WITH_RANDOMX         "Enable RandomX algorithms family" ON)
 option(WITH_ARGON2          "Enable Argon2 algorithms family" ON)
 option(WITH_KAWPOW          "Enable KawPow algorithms family" ON)
 option(WITH_GHOSTRIDER      "Enable GhostRider algorithm" ON)
+option(WITH_SCRYPT_CHACHA   "Enable scrypt-chacha algorithm (YAC)" ON)
 option(WITH_HTTP            "Enable HTTP protocol support (client/server)" ON)
 option(WITH_DEBUG_LOG       "Enable debug log output" OFF)
 option(WITH_TLS             "Enable OpenSSL support" ON)
@@ -202,6 +203,7 @@ include(cmake/randomx.cmake)
 include(cmake/argon2.cmake)
 include(cmake/kawpow.cmake)
 include(cmake/ghostrider.cmake)
+include(cmake/scrypt-chacha.cmake)
 include(cmake/OpenSSL.cmake)
 include(cmake/asm.cmake)
 
@@ -238,6 +240,10 @@ endif()
 
 add_executable(${CMAKE_PROJECT_NAME} ${HEADERS} ${SOURCES} ${SOURCES_OS} ${HEADERS_CRYPTO} ${SOURCES_CRYPTO} ${SOURCES_SYSLOG} ${TLS_SOURCES} ${XMRIG_ASM_SOURCES})
 target_link_libraries(${CMAKE_PROJECT_NAME} ${XMRIG_ASM_LIBRARY} ${OPENSSL_LIBRARIES} ${UV_LIBRARIES} ${EXTRA_LIBS} ${CPUID_LIB} ${ARGON2_LIBRARY} ${ETHASH_LIBRARY} ${GHOSTRIDER_LIBRARY})
+
+# Rebrand: keep the CMake target name `xmrig` (so upstream merges stay clean
+# and src/CMakeLists internals don't churn), but emit a binary called yacrig.
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME "yacrig")
 
 if (WIN32)
     if (NOT ARM_TARGET)

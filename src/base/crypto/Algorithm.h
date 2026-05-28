@@ -82,6 +82,7 @@ public:
         AR2_CHUKWA_V2   = 0x61140000,   // "argon2/chukwav2"  Argon2id (Chukwa v2).
         AR2_WRKZ        = 0x61120000,   // "argon2/wrkz"      Argon2id (WRKZ)
         KAWPOW_RVN      = 0x6b0f0000,   // "kawpow/rvn"       KawPow (RVN)
+        SCRYPT_CHACHA_YAC = 0x73000001, // "scrypt-chacha"    scrypt-jane variant with ChaCha20/8 + Keccak-512 (YAC).
     };
 
     enum Family : uint32_t {
@@ -95,7 +96,8 @@ public:
         RANDOM_X        = 0x72000000,
         ARGON2          = 0x61000000,
         KAWPOW          = 0x6b000000,
-        GHOSTRIDER      = 0x6c000000
+        GHOSTRIDER      = 0x6c000000,
+        SCRYPT_CHACHA   = 0x73000000
     };
 
     static const char *kINVALID;
@@ -161,6 +163,11 @@ public:
 #   ifdef XMRIG_ALGO_GHOSTRIDER
     static const char* kGHOSTRIDER;
     static const char* kGHOSTRIDER_RTM;
+#   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    static const char *kSCRYPT_CHACHA;
+    static const char *kSCRYPT_CHACHA_YAC;
 #   endif
 
     inline Algorithm() = default;

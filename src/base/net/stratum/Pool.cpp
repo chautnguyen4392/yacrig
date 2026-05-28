@@ -40,6 +40,9 @@
 #ifdef XMRIG_FEATURE_HTTP
 #   include "base/net/stratum/DaemonClient.h"
 #   include "base/net/stratum/SelfSelectClient.h"
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#       include "base/net/stratum/YacGetworkClient.h"
+#   endif
 #endif
 
 
@@ -239,7 +242,15 @@ xmrig::IClient *xmrig::Pool::createClient(int id, IClientListener *listener) con
     }
 #   ifdef XMRIG_FEATURE_HTTP
     else if (m_mode == MODE_DAEMON) {
-        client = new DaemonClient(id, listener);
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        if (m_coin == Coin::YAC) {
+            client = new YacGetworkClient(id, listener);
+        }
+        else
+#       endif
+        {
+            client = new DaemonClient(id, listener);
+        }
     }
     else if (m_mode == MODE_SELF_SELECT) {
         client = new SelfSelectClient(id, Platform::userAgent(), listener, m_submitToOrigin);

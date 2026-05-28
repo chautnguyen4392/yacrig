@@ -126,7 +126,7 @@ xmrig::Process::Process(int argc, char **argv) :
 
 #   ifdef XMRIG_SHARED_DATADIR
     if (dataDir.empty()) {
-        dataDir = fmt::format("{}" XMRIG_DIR_SEPARATOR ".xmrig" XMRIG_DIR_SEPARATOR, location(HomeLocation));
+        dataDir = fmt::format("{}" XMRIG_DIR_SEPARATOR "." APP_ID XMRIG_DIR_SEPARATOR, location(HomeLocation));
         MKDIR(dataDir);
 
         dataDir += APP_KIND;

@@ -161,6 +161,11 @@ size_t xmrig::Job::nonceOffset() const
     case Algorithm::GHOSTRIDER:
         return 76;
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    case Algorithm::SCRYPT_CHACHA:
+        return 80;
+#   endif
+
     default:
         break;
     }
@@ -182,6 +187,14 @@ void xmrig::Job::setDiff(uint64_t diff)
     Cvt::toHex(m_rawTarget, sizeof(m_rawTarget), reinterpret_cast<uint8_t *>(&m_target), sizeof(m_target));
 #   endif
 }
+
+
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+void xmrig::Job::setRawTarget32(const uint8_t *target)
+{
+    memcpy(m_rawTarget32, target, sizeof(m_rawTarget32));
+}
+#endif
 
 
 void xmrig::Job::setSigKey(const char *sig_key)
@@ -246,6 +259,10 @@ void xmrig::Job::copy(const Job &other)
 
     memcpy(m_blob, other.m_blob, sizeof(m_blob));
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    memcpy(m_rawTarget32, other.m_rawTarget32, sizeof(m_rawTarget32));
+#   endif
+
 #   ifdef XMRIG_PROXY_PROJECT
     m_rawSeedHash = other.m_rawSeedHash;
     m_rawSigKey   = other.m_rawSigKey;
@@ -300,6 +317,10 @@ void xmrig::Job::move(Job &&other)
     other.m_size        = 0;
     other.m_diff        = 0;
     other.m_algorithm   = Algorithm::INVALID;
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    memcpy(m_rawTarget32, other.m_rawTarget32, sizeof(m_rawTarget32));
+#   endif
 
 #   ifdef XMRIG_PROXY_PROJECT
     m_rawSeedHash = std::move(other.m_rawSeedHash);

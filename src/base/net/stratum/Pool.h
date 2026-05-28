@@ -79,7 +79,7 @@ public:
 
     constexpr static int kKeepAliveTimeout         = 60;
     constexpr static uint16_t kDefaultPort         = 3333;
-    constexpr static uint64_t kDefaultPollInterval = 1000;
+    constexpr static uint64_t kDefaultPollInterval = 10000;
     constexpr static uint64_t kDefaultJobTimeout   = 15000;
 
     Pool() = default;

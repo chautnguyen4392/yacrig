@@ -29,11 +29,12 @@
 
 
 #include "backend/opencl/OclCache.h"
+#include "version.h"
 
 
 void xmrig::OclCache::createDirectory()
 {
-    std::string path = prefix() + "/xmrig";
+    std::string path = prefix() + "/" APP_ID;
     _mkdir(path.c_str());
 
     path += "/.cache";

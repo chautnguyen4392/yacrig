@@ -85,6 +85,7 @@ static const option options[] = {
     { "max-cpu-usage",         1, nullptr, IConfig::CPUMaxThreadsKey      },
     { "cpu-max-threads-hint",  1, nullptr, IConfig::CPUMaxThreadsKey      },
     { "cpu-memory-pool",       1, nullptr, IConfig::MemoryPoolKey         },
+    { "reserve-ram",           1, nullptr, IConfig::ReserveRamKey         },
     { "cpu-no-yield",          0, nullptr, IConfig::YieldKey              },
     { "no-yield",              0, nullptr, IConfig::YieldKey              },
     { "cpu-argon2-impl",       1, nullptr, IConfig::Argon2ImplKey         },
