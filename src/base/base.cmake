@@ -82,6 +82,7 @@ set(HEADERS_BASE
     src/base/tools/cryptonote/WalletAddress.h
     src/base/tools/Cvt.h
     src/base/tools/Handle.h
+    src/base/tools/HostMemoryInfo.h
     src/base/tools/Span.h
     src/base/tools/String.h
     src/base/tools/Timer.h
@@ -140,6 +141,7 @@ set(SOURCES_BASE
     src/base/tools/cryptonote/Signatures.cpp
     src/base/tools/cryptonote/WalletAddress.cpp
     src/base/tools/Cvt.cpp
+    src/base/tools/HostMemoryInfo.cpp
     src/base/tools/String.cpp
     src/base/tools/Timer.cpp
    )

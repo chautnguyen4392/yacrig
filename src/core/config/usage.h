@@ -122,10 +122,15 @@ static inline const std::string &usage()
 #   ifdef XMRIG_FEATURE_CUDA
     u += "\nCUDA backend:\n";
     u += "      --cuda                    enable CUDA mining backend\n";
-    u += "      --cuda-loader=PATH        path to CUDA plugin (xmrig-cuda.dll or libxmrig-cuda.so)\n";
+    u += "      --cuda-loader=PATH        path to CUDA plugin (yacrig-cuda.dll or libyacrig-cuda.so)\n";
     u += "      --cuda-devices=N          comma separated list of CUDA devices to use\n";
     u += "      --cuda-bfactor-hint=N     bfactor hint for autoconfig (0-12)\n";
     u += "      --cuda-bsleep-hint=N      bsleep hint for autoconfig\n";
+    u += "      --cuda-lookup-gap=N       scrypt-chacha scratchpad/compute trade-off (1=store all, higher=less VRAM, default 64)\n";
+    u += "      --cuda-use-system-ram     spill scrypt-chacha scratchpad into host RAM past the VRAM ceiling\n";
+    u += "      --cuda-reserve-vram=N     VRAM (MiB) the autotuner leaves free per GPU (default 0)\n";
+    u += "      --cuda-reserve-ram=N      host RAM (MiB) left for OS and other processes when --cuda-use-system-ram is set (default 4096)\n";
+    u += "      --cuda-host-ram-budget=N  total host RAM (MiB) for scratchpads across all GPUs, split evenly (default 4096, 0 = MemAvailable - reserve-ram)\n";
 #   endif
 #   ifdef XMRIG_FEATURE_NVML
     u += "      --no-nvml                 disable NVML (NVIDIA Management Library) support\n";

@@ -164,6 +164,11 @@ public:
         CudaLoaderKey        = 1208,
         NvmlKey              = 1209,
         HealthPrintTimeKey   = 1210,
+        CudaLookupGapKey     = 1211,
+        CudaUseSystemRamKey  = 1212,
+        CudaReserveVramKey   = 1213,
+        CudaReserveRamKey    = 1214,
+        CudaHostRamBudgetKey = 1215,
     };
 
     virtual ~IConfig() = default;

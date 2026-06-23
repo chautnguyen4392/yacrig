@@ -41,11 +41,11 @@ enum Version : uint32_t
 static uv_lib_t cudaLib;
 
 #if defined(__APPLE__)
-static String defaultLoader = "libxmrig-cuda.dylib";
+static String defaultLoader = "libyacrig-cuda.dylib";
 #elif defined(_WIN32)
-static String defaultLoader = "xmrig-cuda.dll";
+static String defaultLoader = "yacrig-cuda.dll";
 #else
-static String defaultLoader = "libxmrig-cuda.so";
+static String defaultLoader = "libyacrig-cuda.so";
 #endif
 
 
@@ -69,6 +69,10 @@ static const char *kRelease                             = "release";
 static const char *kRxHash                              = "rxHash";
 static const char *kRxPrepare                           = "rxPrepare";
 static const char *kRxUpdateDataset                     = "rxUpdateDataset";
+static const char *kScryptChachaHash                    = "scryptChachaHash";
+static const char *kScryptChachaStopHash                = "scryptChachaStopHash";
+static const char *kScryptChachaConfig                  = "scryptChachaConfig";
+static const char *kScryptChachaWorkUnits               = "scryptChachaWorkUnits";
 static const char *kSetJob                              = "setJob";
 static const char *kSetJob_v2                           = "setJob_v2";
 static const char *kVersion                             = "version";
@@ -94,6 +98,10 @@ using release_t                                         = void (*)(nvid_ctx *);
 using rxHash_t                                          = bool (*)(nvid_ctx *, uint32_t, uint64_t, uint32_t *, uint32_t *);
 using rxPrepare_t                                       = bool (*)(nvid_ctx *, const void *, size_t, bool, uint32_t);
 using rxUpdateDataset_t                                 = bool (*)(nvid_ctx *, const void *, size_t);
+using scryptChachaHash_t                                = bool (*)(nvid_ctx *, uint8_t *, uint64_t, uint32_t *, uint32_t *, uint32_t *);
+using scryptChachaStopHash_t                            = bool (*)(nvid_ctx *);
+using scryptChachaConfig_t                              = bool (*)(nvid_ctx *, int32_t, bool, int32_t, int32_t);
+using scryptChachaWorkUnits_t                           = bool (*)(nvid_ctx *, uint32_t *);
 using setJob_t                                          = bool (*)(nvid_ctx *, const void *, size_t, uint32_t);
 using setJob_v2_t                                       = bool (*)(nvid_ctx *, const void *, size_t, const char *);
 using version_t                                         = uint32_t (*)(Version);
@@ -119,6 +127,10 @@ static release_t pRelease                               = nullptr;
 static rxHash_t pRxHash                                 = nullptr;
 static rxPrepare_t pRxPrepare                           = nullptr;
 static rxUpdateDataset_t pRxUpdateDataset               = nullptr;
+static scryptChachaHash_t pScryptChachaHash             = nullptr;
+static scryptChachaStopHash_t pScryptChachaStopHash     = nullptr;
+static scryptChachaConfig_t pScryptChachaConfig         = nullptr;
+static scryptChachaWorkUnits_t pScryptChachaWorkUnits   = nullptr;
 static setJob_t pSetJob                                 = nullptr;
 static setJob_v2_t pSetJob_v2                           = nullptr;
 static version_t pVersion                               = nullptr;
@@ -241,6 +253,51 @@ bool xmrig::CudaLib::kawPowStopHash(nvid_ctx *ctx) noexcept
 {
     return pKawPowStopHash(ctx);
 }
+
+
+bool xmrig::CudaLib::scryptChachaHash(nvid_ctx *ctx, uint8_t *job_blob, uint64_t target, uint32_t *rescount, uint32_t *resnonce, uint32_t *skipped_hashes) noexcept
+{
+    if (!pScryptChachaHash) {
+        if (rescount) { *rescount = 0; }
+        if (skipped_hashes) { *skipped_hashes = 0; }
+        return false;
+    }
+    return pScryptChachaHash(ctx, job_blob, target, rescount, resnonce, skipped_hashes);
+}
+
+
+bool xmrig::CudaLib::scryptChachaStopHash(nvid_ctx *ctx) noexcept
+{
+    if (!pScryptChachaStopHash) {
+        return true;
+    }
+    return pScryptChachaStopHash(ctx);
+}
+
+
+bool xmrig::CudaLib::scryptChachaConfig(nvid_ctx *ctx, int32_t lookup_gap, bool use_system_ram, int32_t reserve_vram_mb, int32_t host_ram_budget_mb) noexcept
+{
+    if (!pScryptChachaConfig) {
+        return true;
+    }
+    return pScryptChachaConfig(ctx, lookup_gap, use_system_ram, reserve_vram_mb, host_ram_budget_mb);
+}
+
+
+bool xmrig::CudaLib::scryptChachaWorkUnits(nvid_ctx *ctx, uint32_t *out) noexcept
+{
+    if (!pScryptChachaWorkUnits) {
+        if (out) *out = 0;
+        return false;
+    }
+    return pScryptChachaWorkUnits(ctx, out);
+}
+
+
+bool xmrig::CudaLib::hasScryptChachaHash() noexcept      { return pScryptChachaHash != nullptr; }
+bool xmrig::CudaLib::hasScryptChachaConfig() noexcept    { return pScryptChachaConfig != nullptr; }
+bool xmrig::CudaLib::hasScryptChachaStopHash() noexcept  { return pScryptChachaStopHash != nullptr; }
+bool xmrig::CudaLib::hasScryptChachaWorkUnits() noexcept { return pScryptChachaWorkUnits != nullptr; }
 
 
 bool xmrig::CudaLib::setJob(nvid_ctx *ctx, const void *data, size_t size, const Algorithm &algorithm) noexcept
@@ -421,6 +478,16 @@ void xmrig::CudaLib::load()
     }
 
     uv_dlsym(&cudaLib, kRxUpdateDataset, reinterpret_cast<void**>(&pRxUpdateDataset));
+
+    // Optional scrypt-chacha exports: older plugins built without
+    // XMRIG_ALGO_SCRYPT_CHACHA do not provide them. Each call site null-checks
+    // its pointer (scryptChachaConfig / StopHash / WorkUnits) or, for
+    // scryptChachaHash, is only reached when the runner is constructed for
+    // the SCRYPT_CHACHA family (which an older plugin cannot have mined).
+    uv_dlsym(&cudaLib, kScryptChachaHash,      reinterpret_cast<void**>(&pScryptChachaHash));
+    uv_dlsym(&cudaLib, kScryptChachaStopHash,  reinterpret_cast<void**>(&pScryptChachaStopHash));
+    uv_dlsym(&cudaLib, kScryptChachaConfig,    reinterpret_cast<void**>(&pScryptChachaConfig));
+    uv_dlsym(&cudaLib, kScryptChachaWorkUnits, reinterpret_cast<void**>(&pScryptChachaWorkUnits));
 
     pInit();
 }

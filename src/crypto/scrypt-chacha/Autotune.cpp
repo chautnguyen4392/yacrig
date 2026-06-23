@@ -19,10 +19,10 @@
 #include "backend/cpu/interfaces/ICpuInfo.h"
 #include "base/crypto/Algorithm.h"
 #include "base/io/log/Log.h"
+#include "base/tools/HostMemoryInfo.h"
 #include "crypto/scrypt-chacha/scrypt-chacha.h"
 
 #include <algorithm>
-#include <uv.h>
 
 #ifdef XMRIG_OS_LINUX
 #   include <fstream>
@@ -31,34 +31,6 @@
 
 
 namespace xmrig { namespace scrypt_chacha {
-
-
-static uint64_t available_memory()
-{
-#   ifdef XMRIG_OS_LINUX
-    /* MemAvailable was added in Linux 3.14 (Mar 2014); every supported distro
-     * exposes it. The kernel computes it as roughly
-     *   MemFree + reclaimable_page_cache + reclaimable_slab - low_watermark
-     * which is the right answer for "can I allocate N GiB without thrashing?". */
-    std::ifstream f("/proc/meminfo");
-    std::string key;
-    uint64_t value_kb = 0;
-    std::string unit;
-    while (f >> key >> value_kb >> unit) {
-        if (key == "MemAvailable:") {
-            return value_kb * 1024;        // /proc/meminfo reports kB
-        }
-    }
-#   endif
-
-    /* Windows and macOS fall through here. On Windows, uv_get_free_memory()
-     * calls GlobalMemoryStatusEx() and returns ullAvailPhys, which is
-     * semantically equivalent to MemAvailable. On macOS, libuv 1.34 returns
-     * Mach's "free" page count -- closer to Linux MemFree, a known
-     * under-estimate but acceptable until xmrig bumps libuv to 1.45+ which
-     * adds uv_get_available_memory(). */
-    return uv_get_free_memory();
-}
 
 
 #ifdef XMRIG_OS_LINUX
@@ -90,7 +62,7 @@ static size_t hugepages_budget()
 CpuThreads autotune(const Algorithm & /*algo*/, const ICpuInfo *info,
                     uint32_t limit, bool hugePages, uint32_t reserveMb)
 {
-    LOG_DEBUG("scrypt-chacha autotune: entry limit=%u hugePages=%d reserveMb=%u"
+    LOG_DEBUG("scrypt-chacha CPU autotune: entry limit=%u hugePages=%d reserveMb=%u"
               " info->cores=%zu info->threads=%zu",
               limit, hugePages ? 1 : 0, reserveMb,
               info->cores(), info->threads());
@@ -105,21 +77,21 @@ CpuThreads autotune(const Algorithm & /*algo*/, const ICpuInfo *info,
     size_t cores = info->cores();
     if (cores == 0) {
         cores = std::max<size_t>(info->threads() / 2, 1);
-        LOG_DEBUG("scrypt-chacha autotune: info->cores() returned 0,"
+        LOG_DEBUG("scrypt-chacha CPU autotune: info->cores() returned 0,"
                   " fallback cores=%zu (info->threads/2)", cores);
     }
     const size_t cpu_budget = std::max<size_t>(cores * limit / 100, 1);
-    LOG_INFO("scrypt-chacha autotune: cpu_budget=%zu (cores=%zu × limit=%u%%)",
+    LOG_INFO("scrypt-chacha CPU autotune: cpu_budget=%zu (cores=%zu × limit=%u%%)",
                 cpu_budget, cores, limit);
 
     // 2) Memory budget -- leave reserveMb free for the OS + other processes.
     const uint64_t reserve_bytes = static_cast<uint64_t>(reserveMb) * 1024ULL * 1024ULL;
-    const uint64_t avail_ram     = available_memory();
+    const uint64_t avail_ram     = readProcMemInfoAvailable();
     const size_t   mem_budget    = (avail_ram > reserve_bytes)
         ? static_cast<size_t>((avail_ram - reserve_bytes) / kScratchpadBytes)
         : 0;
 
-    LOG_INFO("scrypt-chacha autotune: mem_budget=%zu"
+    LOG_INFO("scrypt-chacha CPU autotune: mem_budget=%zu"
                 " (avail=%.2f GiB - reserve=%.2f GiB ÷ scratchpad=%.0f MiB)",
                 mem_budget,
                 avail_ram / (1024.0 * 1024.0 * 1024.0),
@@ -130,13 +102,13 @@ CpuThreads autotune(const Algorithm & /*algo*/, const ICpuInfo *info,
         LOG_WARN("scrypt-chacha: only %.1f GiB available, need >%.1f GiB for one thread",
                  avail_ram / (1024.0 * 1024.0 * 1024.0),
                  (reserve_bytes + kScratchpadBytes) / (1024.0 * 1024.0 * 1024.0));
-        LOG_DEBUG("scrypt-chacha autotune: returning empty CpuThreads (no memory)");
+        LOG_DEBUG("scrypt-chacha CPU autotune: returning empty CpuThreads (no memory)");
         return {};
     }
 
     // 3) Final thread count -- depends only on CPU and memory budgets.
     const size_t threads = std::min(cpu_budget, mem_budget);
-    LOG_DEBUG("scrypt-chacha autotune: threads=min(cpu_budget=%zu, mem_budget=%zu)=%zu",
+    LOG_DEBUG("scrypt-chacha CPU autotune: threads=min(cpu_budget=%zu, mem_budget=%zu)=%zu",
               cpu_budget, mem_budget, threads);
 
     // 4) Huge-pages budget -- INFORMATIONAL ONLY. Tells the user how the
@@ -152,22 +124,22 @@ CpuThreads autotune(const Algorithm & /*algo*/, const ICpuInfo *info,
     const size_t hp_workers   = std::min(hp_budget, threads);
     const size_t heap_workers = threads - hp_workers;
 
-    LOG_DEBUG("scrypt-chacha autotune: hp_budget=%zu hp_workers=%zu heap_workers=%zu",
+    LOG_DEBUG("scrypt-chacha CPU autotune: hp_budget=%zu hp_workers=%zu heap_workers=%zu",
               hp_budget, hp_workers, heap_workers);
 
-    LOG_INFO("scrypt-chacha autotune: %zu threads"
+    LOG_INFO("scrypt-chacha CPU autotune: %zu threads"
              " (cpu_budget=%zu, mem_budget=%zu, hp_budget=%zu;"
              " avail_ram=%.1f GiB, reserve=%u MB)",
              threads, cpu_budget, mem_budget, hp_budget,
              avail_ram / (1024.0 * 1024.0 * 1024.0), reserveMb);
 
     if (hugePages) {
-        LOG_INFO("scrypt-chacha autotune: %zu worker(s) will use explicit huge pages,"
+        LOG_INFO("scrypt-chacha CPU autotune: %zu worker(s) will use explicit huge pages,"
                  " %zu worker(s) will use heap with MADV_HUGEPAGE (transparent huge pages)",
                  hp_workers, heap_workers);
     }
 
-    LOG_DEBUG("scrypt-chacha autotune: exit threads=%zu intensity=1", threads);
+    LOG_DEBUG("scrypt-chacha CPU autotune: exit threads=%zu intensity=1", threads);
 
     return CpuThreads(threads, 1);
 }

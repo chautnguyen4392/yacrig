@@ -52,6 +52,10 @@
 #   include "crypto/cn/CnHash.h"
 #   include "crypto/cn/CryptoNight.h"
 #   include "crypto/common/VirtualMemory.h"
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#       include "crypto/scrypt-chacha/ScryptChachaCtx.h"
+#       include "crypto/scrypt-chacha/scrypt-chacha.h"
+#   endif
 #endif
 
 
@@ -115,6 +119,69 @@ static inline void checkHash(const JobBundle &bundle, std::vector<JobResult> &re
 static void getResults(JobBundle &bundle, std::vector<JobResult> &results, uint32_t &errors, bool hwAES)
 {
     const auto &algorithm = bundle.job.algorithm();
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    if (algorithm.family() == Algorithm::SCRYPT_CHACHA) {
+        // The GPU only runs a 64-bit prefilter (top 8 bytes of hash vs target),
+        // so its candidates are not authoritative. Re-hash each on the CPU and
+        // apply the full 32-byte target compare here, mirroring CpuWorker, before
+        // forwarding a share. SCRYPT_CHACHA needs its own 512 MiB ROMix
+        // scratchpad: algorithm.l3() is the CN-class size, not this one.
+        auto memory = new VirtualMemory(scrypt_chacha::kScratchpadBytes, false, false, false, 0, VirtualMemory::kDefaultHugePageSize);
+        auto ctx    = scrypt_chacha::createCtx(memory->scratchpad());
+
+        alignas(16) uint8_t hash[32]{ 0 };
+
+        size_t accepted       = 0;
+        size_t false_positive = 0;
+
+        for (uint32_t nonce : bundle.nonces) {
+            *bundle.job.nonce() = nonce;
+
+            scrypt_chacha::hash(bundle.job.blob(), bundle.job.size(), hash, ctx, bundle.job.height());
+
+            // Cheap top-64-bit reject. The GPU prefilter passes hash_top64 <= target,
+            // so only a strictly-greater value here means the GPU hash disagrees with
+            // the CPU one: a genuine compute error. The hash_top64 == target boundary
+            // is left to the authoritative full compare below.
+            if (*reinterpret_cast<uint64_t*>(hash + 24) > bundle.job.target()) {
+                LOG_ERR("%s " RED_S "GPU #%u COMPUTE ERROR", backend_tag(bundle.job.backend()), bundle.device_index);
+                errors++;
+                continue;
+            }
+
+            // Authoritative full 32-byte compare. Hash and target are both
+            // little-endian wire bytes, so the most-significant byte is index 31.
+            const uint8_t *raw_target = bundle.job.rawTarget32();
+            bool ok = true;
+            for (int b = 31; b >= 0; --b) {
+                if (hash[b] < raw_target[b]) { break; }
+                if (hash[b] > raw_target[b]) { ok = false; break; }
+            }
+            if (!ok) {
+                // Prefilter passed but the full target is not met. This is an
+                // expected false positive of the 64-bit prefilter, not an error.
+                false_positive++;
+                continue;
+            }
+
+            results.emplace_back(bundle.job, nonce, hash);
+            accepted++;
+        }
+
+        LOG_VERBOSE("%s scrypt-chacha GPU #%u verify: %zu candidate%s -> %zu share%s (%zu prefilter false positive%s)",
+                    backend_tag(bundle.job.backend()), bundle.device_index,
+                    bundle.nonces.size(), bundle.nonces.size() == 1 ? "" : "s",
+                    accepted, accepted == 1 ? "" : "s",
+                    false_positive, false_positive == 1 ? "" : "s");
+
+        scrypt_chacha::releaseCtx(ctx);
+        delete memory;
+
+        return;
+    }
+#   endif
+
     auto memory           = new VirtualMemory(algorithm.l3(), false, false, false, 0, VirtualMemory::kDefaultHugePageSize);
     alignas(16) uint8_t hash[32]{ 0 };
 

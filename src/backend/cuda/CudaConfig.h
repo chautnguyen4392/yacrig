@@ -45,6 +45,15 @@ public:
     inline int32_t bfactor() const                              { return m_bfactor; }
     inline int32_t bsleep() const                               { return m_bsleep; }
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    inline int  lookupGap() const                               { return m_lookup_gap; }
+    inline bool useSystemRam() const                            { return m_use_system_ram; }
+    inline int  reserveVramMb() const                           { return m_reserve_vram_mb; }
+    inline int  reserveRamMb() const                            { return m_reserve_ram_mb; }
+    inline int  hostRamBudgetMb() const                         { return m_host_ram_budget_mb; }
+    inline int  defaultHostRamBudgetMbPerGpu() const            { return m_default_host_ram_budget_mb_per_gpu; }
+#   endif
+
 #   ifdef XMRIG_FEATURE_NVML
     inline bool isNvmlEnabled() const                           { return m_nvml; }
     inline const String &nvmlLoader() const                     { return m_nvmlLoader; }
@@ -53,6 +62,10 @@ public:
 private:
     void generate();
     void setDevicesHint(const char *devicesHint);
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    void setupScryptChacha(const std::vector<CudaDevice> &devices);
+#   endif
 
     bool m_enabled          = false;
     bool m_shouldSave       = false;
@@ -66,6 +79,15 @@ private:
 #   else
     int32_t m_bfactor      = 0;
     int32_t m_bsleep       = 0;
+#   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    int  m_lookup_gap                         = 64;
+    bool m_use_system_ram                     = false;
+    int  m_reserve_vram_mb                    = 0;
+    int  m_reserve_ram_mb                     = 4096; // host-level OS reserve, never per-GPU
+    int  m_host_ram_budget_mb                 = 4096; // global host-RAM cap for all GPUs, split evenly; 0 = use MemAvailable - reserve_ram_mb
+    int  m_default_host_ram_budget_mb_per_gpu = 0;   // derived in generate(), not parsed
 #   endif
 
 #   ifdef XMRIG_FEATURE_NVML

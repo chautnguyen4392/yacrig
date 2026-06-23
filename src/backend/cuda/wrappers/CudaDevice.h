@@ -63,6 +63,7 @@ public:
     inline const String &name() const               { return m_name; }
     inline uint32_t arch() const                    { return (computeCapability(true) * 10) + computeCapability(false); }
     inline uint32_t index() const                   { return m_index; }
+    inline nvid_ctx *ctx() const                    { return m_ctx; }
 
 #   ifdef XMRIG_FEATURE_NVML
     inline nvmlDevice_t nvmlDevice() const          { return m_nvmlDevice; }

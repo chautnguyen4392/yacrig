@@ -47,6 +47,9 @@ xmrig::CudaBaseRunner::~CudaBaseRunner()
 bool xmrig::CudaBaseRunner::init()
 {
     m_ctx = CudaLib::alloc(m_data.thread.index(), m_data.thread.bfactor(), m_data.thread.bsleep());
+
+    configureCtx();
+
     if (!callWrapper(CudaLib::deviceInfo(m_ctx, m_data.thread.blocks(), m_data.thread.threads(), m_data.algorithm, m_data.thread.datasetHost()))) {
         return false;
     }

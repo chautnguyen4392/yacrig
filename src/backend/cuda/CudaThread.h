@@ -45,6 +45,26 @@ public:
     inline int64_t affinity() const                          { return m_affinity; }
     inline uint32_t index() const                            { return m_index; }
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Per-GPU overrides. has_*() returns whether the user pinned the value
+    // on this device; the unpinned default is resolved in CudaConfig::get()
+    // against CudaConfig's global field.
+    inline bool hasLookupGap() const         { return m_has_lookup_gap; }
+    inline bool hasUseSystemRam() const      { return m_has_use_system_ram; }
+    inline bool hasReserveVramMb() const     { return m_has_reserve_vram_mb; }
+    inline bool hasHostRamBudgetMb() const   { return m_has_host_ram_budget_mb; }
+    inline int  lookupGap() const            { return m_lookup_gap; }
+    inline bool useSystemRam() const         { return m_use_system_ram; }
+    inline int  reserveVramMb() const        { return m_reserve_vram_mb; }
+    inline int  hostRamBudgetMb() const      { return m_host_ram_budget_mb; }
+
+    // Host-mapped (system-RAM) warp count the plugin autotune estimated for this
+    // launch, read back from the autotune ctx. Lets the backend report the VRAM /
+    // RAM scratchpad split without duplicating the plugin's reserve math. 0 for a
+    // VRAM-only launch or a JSON-pinned thread (no autotune read-back).
+    inline uint32_t scryptChachaRamWarps() const { return m_scryptChachaRamWarps; }
+#   endif
+
     inline bool operator!=(const CudaThread &other) const    { return !isEqual(other); }
     inline bool operator==(const CudaThread &other) const    { return isEqual(other); }
 
@@ -64,6 +84,18 @@ private:
 #   else
     uint32_t m_bfactor      = 0;
     uint32_t m_bsleep       = 0;
+#   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    bool m_has_lookup_gap         = false;
+    bool m_has_use_system_ram     = false;
+    bool m_has_reserve_vram_mb    = false;
+    bool m_has_host_ram_budget_mb = false;
+    int  m_lookup_gap         = 0;
+    bool m_use_system_ram     = false;
+    int  m_reserve_vram_mb    = 0;
+    int  m_host_ram_budget_mb = 0;
+    uint32_t m_scryptChachaRamWarps = 0;
 #   endif
 };
 

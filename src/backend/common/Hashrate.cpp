@@ -165,6 +165,10 @@ std::pair<bool, double> xmrig::Hashrate::hashrate(size_t index, size_t ms) const
         return { true, 0.0 };
     }
 
+    if (lastestHashCnt < earliestHashCount) {
+        return { false, 0.0 };  // counter moved backwards: skip rather than underflow the unsigned subtraction below
+    }
+
     if (lastestStamp == earliestStamp) {
         return { false, 0.0 };
     }

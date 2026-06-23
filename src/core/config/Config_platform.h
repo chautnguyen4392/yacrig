@@ -153,6 +153,11 @@ static const option options[] = {
     { "cuda-devices",          1, nullptr, IConfig::CudaDevicesKey        },
     { "cuda-bfactor-hint",     1, nullptr, IConfig::CudaBFactorKey        },
     { "cuda-bsleep-hint",      1, nullptr, IConfig::CudaBSleepKey         },
+    { "cuda-lookup-gap",       1, nullptr, IConfig::CudaLookupGapKey      },
+    { "cuda-use-system-ram",   0, nullptr, IConfig::CudaUseSystemRamKey   },
+    { "cuda-reserve-vram",     1, nullptr, IConfig::CudaReserveVramKey    },
+    { "cuda-reserve-ram",      1, nullptr, IConfig::CudaReserveRamKey     },
+    { "cuda-host-ram-budget",  1, nullptr, IConfig::CudaHostRamBudgetKey  },
 #   endif
 #   ifdef XMRIG_FEATURE_NVML
     { "no-nvml",               0, nullptr, IConfig::NvmlKey               },

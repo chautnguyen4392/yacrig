@@ -56,6 +56,7 @@ public:
         DevicePciDeviceID,
         DevicePciDomainID,
         DeviceDatasetHost,
+        DeviceScryptChachaRamWarps,   // must match the plugin's DeviceProperty ordinal: scrypt-chacha host-mapped warp count from the autotune
     };
 
     static bool init(const char *fileName = nullptr);
@@ -75,6 +76,14 @@ public:
     static bool kawPowHash(nvid_ctx *ctx, uint8_t* job_blob, uint64_t target, uint32_t *rescount, uint32_t *resnonce, uint32_t *skipped_hashes) noexcept;
     static bool kawPowPrepare(nvid_ctx *ctx, const void* cache, size_t cache_size, const void* dag_precalc, size_t dag_size, uint32_t height, const uint64_t* dag_sizes) noexcept;
     static bool kawPowStopHash(nvid_ctx *ctx) noexcept;
+    static bool scryptChachaHash(nvid_ctx *ctx, uint8_t *job_blob, uint64_t target, uint32_t *rescount, uint32_t *resnonce, uint32_t *skipped_hashes) noexcept;
+    static bool scryptChachaStopHash(nvid_ctx *ctx) noexcept;
+    static bool scryptChachaConfig(nvid_ctx *ctx, int32_t lookup_gap, bool use_system_ram, int32_t reserve_vram_mb, int32_t host_ram_budget_mb) noexcept;
+    static bool scryptChachaWorkUnits(nvid_ctx *ctx, uint32_t *out) noexcept;
+    static bool hasScryptChachaHash() noexcept;
+    static bool hasScryptChachaConfig() noexcept;
+    static bool hasScryptChachaStopHash() noexcept;
+    static bool hasScryptChachaWorkUnits() noexcept;
     static bool setJob(nvid_ctx *ctx, const void *data, size_t size, const Algorithm &algorithm) noexcept;
     static const char *deviceName(nvid_ctx *ctx) noexcept;
     static const char *lastError(nvid_ctx *ctx) noexcept;

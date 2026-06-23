@@ -46,12 +46,43 @@ public:
 
     static const char *tag();
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // CUDA threads cooperating on one scrypt-chacha work unit: 1 on the
+    // Volta-family kernel (compute capability >= 7), 4 on Pascal. Single source
+    // for the cc >= 7 ? 1 : 4 split shared by the launch-config log and the
+    // runner's work-unit read-back.
+    uint32_t scryptChachaThreadsPerWU() const;
+
+    // The launch's theoretical work-unit count: threads * blocks divided by the
+    // per-WU cooperation factor above. Matches what scryptchacha_autotune
+    // targets before deviceInit's VRAM back-off.
+    size_t scryptChachaTheoreticalWorkUnits() const;
+
+    // Scratchpad split (bytes) for a launch of `workUnits` work units of which
+    // `ramWarps` warps are host-mapped: VRAM holds the rest. The split is decided
+    // by the plugin (its host-RAM-adaptive reserve), so the caller passes the
+    // plugin's warp count rather than re-deriving it: the startup table passes
+    // the autotune estimate (CudaThread::scryptChachaRamWarps), the runner passes
+    // the actual post-deviceInit count read back from its ctx. Only the stable
+    // per-warp scratchpad size is computed here.
+    void scryptChachaMemorySplit(size_t ramWarps, size_t workUnits, size_t &vramBytes, size_t &ramBytes, size_t &totalBytes) const;
+#   endif
+
     const Algorithm algorithm;
     const CudaDevice &device;
     const CudaThread thread;
     const int64_t affinity;
     const Miner *miner;
     const uint32_t benchSize = 0;
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Effective per-GPU tuning. Resolved at CudaConfig::get time as
+    // CudaThread.field.value_or(CudaConfig.field).
+    int  scryptchacha_lookup_gap         = 64;
+    bool scryptchacha_use_system_ram     = false;
+    int  scryptchacha_reserve_vram_mb    = 0;
+    int  scryptchacha_host_ram_budget_mb = 0;
+#   endif
 };
 
 

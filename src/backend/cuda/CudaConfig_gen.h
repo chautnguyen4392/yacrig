@@ -139,6 +139,15 @@ size_t inline generate<Algorithm::KAWPOW>(Threads<CudaThreads> &threads, const s
 #endif
 
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+template<>
+size_t inline generate<Algorithm::SCRYPT_CHACHA>(Threads<CudaThreads> &threads, const std::vector<CudaDevice> &devices)
+{
+    return generate(Algorithm::kSCRYPT_CHACHA, threads, Algorithm::SCRYPT_CHACHA_YAC, devices);
+}
+#endif
+
+
 } /* namespace xmrig */
 
 

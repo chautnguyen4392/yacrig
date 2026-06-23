@@ -18,7 +18,13 @@
 
 
 #include "backend/cuda/CudaLaunchData.h"
+#include "backend/cuda/wrappers/CudaDevice.h"
 #include "backend/common/Tags.h"
+
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "crypto/scrypt-chacha/scrypt-chacha.h"
+#   include <algorithm>
+#endif
 
 
 xmrig::CudaLaunchData::CudaLaunchData(const Miner *miner, const Algorithm &algorithm, const CudaThread &thread, const CudaDevice &device) :
@@ -43,3 +49,36 @@ const char *xmrig::CudaLaunchData::tag()
 {
     return cuda_tag();
 }
+
+
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+uint32_t xmrig::CudaLaunchData::scryptChachaThreadsPerWU() const
+{
+    return device.computeCapability(true) >= 7 ? 1 : 4;
+}
+
+
+size_t xmrig::CudaLaunchData::scryptChachaTheoreticalWorkUnits() const
+{
+    return static_cast<size_t>(thread.threads()) * thread.blocks() / scryptChachaThreadsPerWU();
+}
+
+
+void xmrig::CudaLaunchData::scryptChachaMemorySplit(size_t ramWarps, size_t workUnits, size_t &vramBytes, size_t &ramBytes, size_t &totalBytes) const
+{
+    const int    lookup_gap  = scryptchacha_lookup_gap > 0 ? scryptchacha_lookup_gap : 1;
+    const size_t wu_per_warp = 32 / scryptChachaThreadsPerWU();                       // 32 on Volta, 8 on Pascal
+    const size_t per_warp    = wu_per_warp * (scrypt_chacha::kScratchpadBytes / static_cast<size_t>(lookup_gap));
+    const size_t total_warps = wu_per_warp ? workUnits / wu_per_warp : 0;
+
+    // The host-mapped warp count is the plugin's figure (the host-RAM-adaptive
+    // reserve that decides it lives only in the plugin). Only the per-warp
+    // scratchpad size, a stable algorithm constant, is computed here.
+    const size_t ram_warps  = std::min(ramWarps, total_warps);
+    const size_t vram_warps = total_warps - ram_warps;
+
+    vramBytes  = vram_warps  * per_warp;
+    ramBytes   = ram_warps   * per_warp;
+    totalBytes = total_warps * per_warp;
+}
+#endif

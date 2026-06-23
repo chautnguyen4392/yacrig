@@ -16,6 +16,7 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <algorithm>
 #include <mutex>
 #include <string>
 
@@ -43,6 +44,11 @@
 #ifdef XMRIG_ALGO_KAWPOW
 #   include "crypto/kawpow/KPCache.h"
 #   include "crypto/kawpow/KPHash.h"
+#endif
+
+
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "crypto/scrypt-chacha/scrypt-chacha.h"
 #endif
 
 
@@ -201,7 +207,9 @@ public:
     }
 
 
-    inline void start(const Job &job)
+    // Per-device launch table for CryptoNight / RandomX / KawPow: one fixed
+    // per-hash scratchpad (Algorithm::l3()), tuned by bfactor / bsleep.
+    inline void printProfile(const Job &job) const
     {
         LOG_INFO("%s use profile " BLUE_BG(WHITE_BOLD_S " %s ") WHITE_BOLD_S " (" CYAN_BOLD("%zu") WHITE_BOLD(" thread%s)") " scratchpad " CYAN_BOLD("%zu KB"),
                  Tags::nvidia(),
@@ -213,7 +221,7 @@ public:
 
         Log::print(WHITE_BOLD("|  # | GPU |  BUS ID | INTENSITY | THREADS | BLOCKS | BF |  BS | MEMORY | NAME"));
 
-        size_t algo_l3 = algo.l3();
+        const size_t algo_l3 = algo.l3();
 
         size_t i = 0;
         for (const auto &data : threads) {
@@ -240,7 +248,84 @@ public:
                        data.device.name().data()
                        );
 
-                    i++;
+            i++;
+        }
+    }
+
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Per-device launch table for scrypt-chacha. The per-hash scratchpad is
+    // not Algorithm::l3() (a sentinel 1 for this family): it is
+    // kScratchpadBytes per work unit at lookup_gap 1, scaled down by the
+    // configured lookup_gap. bfactor / bsleep do not apply, so the table
+    // reports the lookup_gap and the VRAM / system-RAM scratchpad split in
+    // their place.
+    //
+    // The VRAM / RAM split is the autotune's estimate, computed by the same
+    // host-RAM-adaptive reserve the plugin uses (CudaLaunchData::
+    // scryptChachaMemoryEstimate), so this table agrees with the plugin's
+    // autotune log line. deviceInit backs the warp count off if the VRAM
+    // allocation falls short, and the runner then logs the work-unit count
+    // actually allocated. NAME is the last column so the variable-width GPU
+    // name never misaligns the fixed columns before it.
+    inline void printScryptChachaProfile() const
+    {
+        // The per-WU scratchpad footprint depends on the per-device lookup_gap
+        // (kScratchpadBytes / lookup_gap), so a single profile-wide value would be
+        // ambiguous when devices differ. The per-device VRAM / RAM / TOTAL MiB and
+        // LOOKUP GAP columns in the table below carry the real footprint instead.
+        LOG_INFO("%s use profile " BLUE_BG(WHITE_BOLD_S " %s ") WHITE_BOLD_S " (" CYAN_BOLD("%zu") WHITE_BOLD(" thread%s)"),
+                 Tags::nvidia(),
+                 profileName.data(),
+                 threads.size(),
+                 threads.size() > 1 ? "s" : ""
+                 );
+
+        Log::print(WHITE_BOLD("|  # | GPU |  BUS ID | WORK UNITS | THREADS | BLOCKS | LOOKUP GAP | VRAM MiB | RAM MiB | TOTAL MiB | NAME"));
+
+        size_t i = 0;
+        for (const auto &data : threads) {
+            const int    lookup_gap = data.scryptchacha_lookup_gap > 0 ? data.scryptchacha_lookup_gap : 1;
+            const size_t work_units = data.scryptChachaTheoreticalWorkUnits();
+
+            // Autotune estimate. A JSON-pinned thread skips the autotune, so its
+            // RAM warp count is 0 here (the table shows the scratchpad as
+            // all-VRAM): its real split is logged by the runner READY line after
+            // deviceInit. An autotuned thread carries the autotune estimate.
+            size_t vramBytes = 0, ramBytes = 0, totalBytes = 0;
+            data.scryptChachaMemorySplit(data.thread.scryptChachaRamWarps(), work_units, vramBytes, ramBytes, totalBytes);
+
+            Log::print("|" CYAN_BOLD("%3zu") " |" CYAN_BOLD("%4u") " |" YELLOW(" %7s") " |" CYAN_BOLD("%11zu") " |" CYAN_BOLD("%8d") " |"
+                       CYAN_BOLD("%7d") " |" CYAN_BOLD("%11d") " |" CYAN("%9zu") " |" CYAN("%8zu") " |" CYAN("%10zu") " | " GREEN_BOLD("%s"),
+                       i,
+                       data.thread.index(),
+                       data.device.topology().toString().data(),
+                       work_units,
+                       data.thread.threads(),
+                       data.thread.blocks(),
+                       lookup_gap,
+                       vramBytes / oneMiB,
+                       ramBytes / oneMiB,
+                       totalBytes / oneMiB,
+                       data.device.name().data()
+                       );
+
+            i++;
+        }
+    }
+#   endif
+
+
+    inline void start(const Job &job)
+    {
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        if (algo.family() == Algorithm::SCRYPT_CHACHA) {
+            printScryptChachaProfile();
+        }
+        else
+#       endif
+        {
+            printProfile(job);
         }
 
         status.start(threads.size());
@@ -488,6 +573,19 @@ void xmrig::CudaBackend::stop()
     }
 
     const uint64_t ts = Chrono::steadyMSecs();
+
+    // Abort any in-flight GPU launch before joining the worker threads below
+    // (workers.stop() deletes each Thread, which joins it). A scrypt-chacha
+    // launch can run for seconds, so without this the join blocks until the
+    // kernel finishes and Ctrl+C appears to hang. This reuses the same path as
+    // a new-job notification: it sets the plugin's host-mapped early-abort flag
+    // (scryptchacha_stop_host), which the ROMix kernels poll, so the in-flight
+    // run() returns within a fraction of a launch. Nonce::stop() has already
+    // zeroed the sequence by this point (Miner::stop), so the worker loop then
+    // exits instead of starting another launch. Passing a default Job is safe:
+    // every runner's jobEarlyNotification ignores the job and only arms the
+    // abort flag.
+    d_ptr->workers.jobEarlyNotification(Job());
 
     d_ptr->workers.stop();
     d_ptr->threads.clear();

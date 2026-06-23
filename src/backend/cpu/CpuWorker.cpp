@@ -420,8 +420,19 @@ void xmrig::CpuWorker<N>::start()
                     }
 #                   endif
 
-                    if (value >= job.target()) {
-                        continue;                                       // cheap reject (CN + scrypt-chacha)
+                    // Cheap top-64-bit reject. CryptoNight's 64-bit target is
+                    // authoritative, so the reject is strict (value >= target). For
+                    // scrypt-chacha the 64-bit value is only a prefilter: admit the
+                    // value == target boundary and let the full 32-byte compare below
+                    // decide, so a hash <= the full target is never dropped here.
+                    bool reject = value >= job.target();
+#                   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+                    if (job.algorithm().family() == Algorithm::SCRYPT_CHACHA) {
+                        reject = value > job.target();
+                    }
+#                   endif
+                    if (reject) {
+                        continue;
                     }
 
 #                   ifdef XMRIG_ALGO_SCRYPT_CHACHA
@@ -650,6 +661,18 @@ void xmrig::CpuWorker<N>::consumeJob()
 #   ifdef XMRIG_ALGO_SCRYPT_CHACHA
     if (m_job.currentJob().algorithm().family() == Algorithm::SCRYPT_CHACHA) {
         allocateScryptChachaCtx();
+
+        // Log the nonce block this worker just reserved. CPU and GPU share the
+        // per-job nonce counter (Nonce::m_nonces is indexed by job index, not by
+        // backend), so each worker and the GPU pull a distinct kReserveCount block
+        // from it. Printing the range here lets the operator confirm the CPU and
+        // GPU work ranges do not overlap. The worker may not exhaust the block
+        // before the job changes, so this is the reserved range, not a count of
+        // nonces actually hashed.
+        const uint32_t startNonce = readUnaligned(m_job.nonce(0));
+        LOG_VERBOSE("%s" CYAN_BOLD(" #%zu") " scrypt-chacha CPU processing nonces " CYAN_BOLD("%u") "-" CYAN_BOLD("%u")
+                 " (" CYAN_BOLD("%u") " nonces/reservation)",
+                 CpuLaunchData::tag(), id(), startNonce, startNonce + kReserveCount - 1, kReserveCount);
     }
     else
 #   endif

@@ -237,6 +237,21 @@ void xmrig::ConfigTransform::transform(rapidjson::Document &doc, int key, const 
 
     case IConfig::CudaBSleepKey: /* --cuda-bsleep-hint */
         return set(doc, Config::kCuda, "bsleep-hint", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
+
+    case IConfig::CudaLookupGapKey: /* --cuda-lookup-gap */
+        return set(doc, Config::kCuda, "lookup_gap", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
+
+    case IConfig::CudaUseSystemRamKey: /* --cuda-use-system-ram */
+        return set(doc, Config::kCuda, "use_system_ram", true);
+
+    case IConfig::CudaReserveVramKey: /* --cuda-reserve-vram */
+        return set(doc, Config::kCuda, "reserve_vram_mb", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
+
+    case IConfig::CudaReserveRamKey: /* --cuda-reserve-ram */
+        return set(doc, Config::kCuda, "reserve_ram_mb", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
+
+    case IConfig::CudaHostRamBudgetKey: /* --cuda-host-ram-budget */
+        return set(doc, Config::kCuda, "host_ram_budget_mb", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
 #   endif
 
 #   ifdef XMRIG_FEATURE_NVML

@@ -35,6 +35,13 @@ static const char *kIndex       = "index";
 static const char *kThreads     = "threads";
 static const char *kDatasetHost = "dataset_host";
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+static const char *kLookupGap        = "lookup_gap";
+static const char *kUseSystemRam     = "use_system_ram";
+static const char *kReserveVramMb    = "reserve_vram_mb";
+static const char *kHostRamBudgetMb  = "host_ram_budget_mb";
+#endif
+
 } // namespace xmrig
 
 
@@ -57,6 +64,25 @@ xmrig::CudaThread::CudaThread(const rapidjson::Value &value)
     else {
         m_datasetHost = Json::getBool(value, kDatasetHost);
     }
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    {
+        const auto &v = Json::getValue(value, kLookupGap);
+        if (v.IsInt())  { m_has_lookup_gap = true; m_lookup_gap = v.GetInt(); }
+    }
+    {
+        const auto &v = Json::getValue(value, kUseSystemRam);
+        if (v.IsBool()) { m_has_use_system_ram = true; m_use_system_ram = v.GetBool(); }
+    }
+    {
+        const auto &v = Json::getValue(value, kReserveVramMb);
+        if (v.IsInt())  { m_has_reserve_vram_mb = true; m_reserve_vram_mb = v.GetInt(); }
+    }
+    {
+        const auto &v = Json::getValue(value, kHostRamBudgetMb);
+        if (v.IsInt())  { m_has_host_ram_budget_mb = true; m_host_ram_budget_mb = v.GetInt(); }
+    }
+#   endif
 }
 
 
@@ -68,7 +94,11 @@ xmrig::CudaThread::CudaThread(uint32_t index, nvid_ctx *ctx) :
     m_bfactor(CudaLib::deviceUint(ctx, CudaLib::DeviceBFactor)),
     m_bsleep(CudaLib::deviceUint(ctx, CudaLib::DeviceBSleep))
 {
-
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // The plugin autotune stashed the host-mapped warp count on the ctx; read it
+    // back here while the autotune ctx is still alive. 0 for non-scrypt families.
+    m_scryptChachaRamWarps = CudaLib::deviceUint(ctx, CudaLib::DeviceScryptChachaRamWarps);
+#   endif
 }
 
 
@@ -101,6 +131,13 @@ rapidjson::Value xmrig::CudaThread::toJSON(rapidjson::Document &doc) const
     if (m_datasetHost >= 0) {
         out.AddMember(StringRef(kDatasetHost), m_datasetHost > 0, allocator);
     }
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    if (m_has_lookup_gap)         { out.AddMember(StringRef(kLookupGap),        m_lookup_gap,         allocator); }
+    if (m_has_use_system_ram)     { out.AddMember(StringRef(kUseSystemRam),     m_use_system_ram,     allocator); }
+    if (m_has_reserve_vram_mb)    { out.AddMember(StringRef(kReserveVramMb),    m_reserve_vram_mb,    allocator); }
+    if (m_has_host_ram_budget_mb) { out.AddMember(StringRef(kHostRamBudgetMb),  m_host_ram_budget_mb, allocator); }
+#   endif
 
     return out;
 }

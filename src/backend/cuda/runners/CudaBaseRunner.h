@@ -57,6 +57,11 @@ protected:
 protected:
     bool callWrapper(bool result) const;
 
+    // Hook run inside init() between CudaLib::alloc and deviceInfo, so a derived
+    // runner can push per-algorithm tuning to the freshly-allocated ctx before
+    // the plugin probes the device. Default is a no-op.
+    virtual void configureCtx() {}
+
     const CudaLaunchData &m_data;
     const size_t m_threadId;
     nvid_ctx *m_ctx     = nullptr;
