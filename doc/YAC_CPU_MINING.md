@@ -2,7 +2,7 @@
 
 This document is the single user-facing reference for mining [Yacoin](https://github.com/yacoin/yacoin) (YAC) on a CPU with YACRig. It covers building the miner, connecting it to a `yacoind` instance, tuning it for your hardware, and interpreting its output.
 
-For the absolute minimum "first run" walkthrough, see the **Quick start** section in [`README.md`](../README.md). The rest of this document expands on the same material with the full picture.
+For the absolute minimum "first run" walkthrough, see the [**Quick start** section in `README.md`](../README.md#4-quick-start). The rest of this document expands on the same material with the full picture.
 
 ## Table of contents
 
