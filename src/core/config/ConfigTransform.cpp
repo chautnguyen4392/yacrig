@@ -219,6 +219,24 @@ void xmrig::ConfigTransform::transform(rapidjson::Document &doc, int key, const 
         }
 
         return set(doc, Config::kOcl, "platform", arg);
+
+    case IConfig::OclLookupGapKey: /* --opencl-lookup-gap */
+        return set(doc, Config::kOcl, "lookup_gap", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
+
+    case IConfig::OclWorksizeKey: /* --opencl-worksize */
+        return set(doc, Config::kOcl, "worksize", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
+
+    case IConfig::OclUseSystemRamKey: /* --opencl-use-system-ram */
+        return set(doc, Config::kOcl, "use_system_ram", true);
+
+    case IConfig::OclReserveVramKey: /* --opencl-reserve-vram */
+        return set(doc, Config::kOcl, "reserve_vram_mb", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
+
+    case IConfig::OclReserveRamKey: /* --opencl-reserve-ram */
+        return set(doc, Config::kOcl, "reserve_ram_mb", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
+
+    case IConfig::OclHostRamBudgetKey: /* --opencl-host-ram-budget */
+        return set(doc, Config::kOcl, "host_ram_budget_mb", static_cast<uint64_t>(strtol(arg, nullptr, 10)));
 #   endif
 
 #   ifdef XMRIG_FEATURE_CUDA

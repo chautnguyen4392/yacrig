@@ -66,9 +66,12 @@ xmrig::CudaThread::CudaThread(const rapidjson::Value &value)
     }
 
 #   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Each knob is pinned independently, and only a non-negative integer pins
+    // it: a negative value is ignored (unpinned), matching the OpenCL thread
+    // parse, which accepts only unsigned values.
     {
         const auto &v = Json::getValue(value, kLookupGap);
-        if (v.IsInt())  { m_has_lookup_gap = true; m_lookup_gap = v.GetInt(); }
+        if (v.IsInt() && v.GetInt() >= 0)  { m_has_lookup_gap = true; m_lookup_gap = v.GetInt(); }
     }
     {
         const auto &v = Json::getValue(value, kUseSystemRam);
@@ -76,11 +79,22 @@ xmrig::CudaThread::CudaThread(const rapidjson::Value &value)
     }
     {
         const auto &v = Json::getValue(value, kReserveVramMb);
-        if (v.IsInt())  { m_has_reserve_vram_mb = true; m_reserve_vram_mb = v.GetInt(); }
+        if (v.IsInt() && v.GetInt() >= 0)  { m_has_reserve_vram_mb = true; m_reserve_vram_mb = v.GetInt(); }
     }
     {
         const auto &v = Json::getValue(value, kHostRamBudgetMb);
-        if (v.IsInt())  { m_has_host_ram_budget_mb = true; m_host_ram_budget_mb = v.GetInt(); }
+        if (v.IsInt() && v.GetInt() >= 0)  { m_has_host_ram_budget_mb = true; m_host_ram_budget_mb = v.GetInt(); }
+    }
+
+    // Auto launch geometry. On an entry that pins scrypt-chacha knobs,
+    // non-positive or absent threads/blocks mean "autotune at runner init":
+    // normalise to the -1/-1 marker the plugin's scryptchacha_autotune sizing
+    // branch triggers on (it fills both, so partial geometry is full auto).
+    // The launch size then follows the merged per-GPU tuning and the memory
+    // state at init, mirroring the OpenCL backend's auto intensity.
+    if (hasScryptChachaPins() && (m_threads <= 0 || m_blocks <= 0)) {
+        m_threads = -1;
+        m_blocks  = -1;
     }
 #   endif
 }
@@ -110,7 +124,24 @@ bool xmrig::CudaThread::isEqual(const CudaThread &other) const
            m_index       == other.m_index &&
            m_bfactor     == other.m_bfactor &&
            m_bsleep      == other.m_bsleep &&
-           m_datasetHost == other.m_datasetHost;
+           m_datasetHost == other.m_datasetHost
+#          ifdef XMRIG_ALGO_SCRYPT_CHACHA
+           // The scrypt-chacha pins are part of the thread's identity, like
+           // on the OpenCL thread: two entries differing only in a pinned
+           // knob (or in whether it is pinned at all) are different threads,
+           // so setJob's launch-data comparison recreates the workers.
+           // m_scryptChachaRamWarps is a ctx read-back, not configuration,
+           // and stays out.
+           && m_has_lookup_gap         == other.m_has_lookup_gap
+           && m_has_use_system_ram     == other.m_has_use_system_ram
+           && m_has_reserve_vram_mb    == other.m_has_reserve_vram_mb
+           && m_has_host_ram_budget_mb == other.m_has_host_ram_budget_mb
+           && m_lookup_gap             == other.m_lookup_gap
+           && m_use_system_ram         == other.m_use_system_ram
+           && m_reserve_vram_mb        == other.m_reserve_vram_mb
+           && m_host_ram_budget_mb     == other.m_host_ram_budget_mb
+#          endif
+           ;
 }
 
 

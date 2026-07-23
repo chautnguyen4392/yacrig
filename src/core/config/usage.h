@@ -116,6 +116,12 @@ static inline const std::string &usage()
     u += "      --opencl-platform=N       OpenCL platform index or name\n";
     u += "      --opencl-loader=PATH      path to OpenCL-ICD-Loader (OpenCL.dll or libOpenCL.so)\n";
     u += "      --opencl-no-cache         disable OpenCL cache\n";
+    u += "      --opencl-lookup-gap=N     scrypt-chacha scratchpad/compute trade-off (1=store all, higher=less VRAM, default 32)\n";
+    u += "      --opencl-worksize=N       scrypt-chacha OpenCL work-group size (default 32)\n";
+    u += "      --opencl-use-system-ram   spill scrypt-chacha scratchpad into host RAM past the VRAM ceiling\n";
+    u += "      --opencl-reserve-vram=N   VRAM (MiB) the autotuner leaves free per GPU (default 0)\n";
+    u += "      --opencl-reserve-ram=N    host RAM (MiB) left for OS and other processes when --opencl-use-system-ram is set (default 4096)\n";
+    u += "      --opencl-host-ram-budget=N total host RAM (MiB) for scratchpads across all GPUs, split evenly (default 4096, 0 = MemAvailable - reserve-ram)\n";
     u += "      --print-platforms         print available OpenCL platforms and exit\n";
 #   endif
 
@@ -134,6 +140,9 @@ static inline const std::string &usage()
 #   endif
 #   ifdef XMRIG_FEATURE_NVML
     u += "      --no-nvml                 disable NVML (NVIDIA Management Library) support\n";
+#   endif
+#   if defined(XMRIG_FEATURE_OPENCL) || defined(XMRIG_FEATURE_CUDA)
+    u += "      --print-devices           print available GPU devices (OpenCL and CUDA) and exit\n";
 #   endif
 
 #   ifdef XMRIG_FEATURE_HTTP

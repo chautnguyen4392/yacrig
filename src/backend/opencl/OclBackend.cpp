@@ -16,6 +16,7 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <cinttypes>
 #include <mutex>
 #include <string>
 
@@ -44,6 +45,11 @@
 #ifdef XMRIG_ALGO_KAWPOW
 #   include "crypto/kawpow/KPCache.h"
 #   include "crypto/kawpow/KPHash.h"
+#endif
+
+
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "crypto/scrypt-chacha/scrypt-chacha.h"
 #endif
 
 
@@ -191,6 +197,24 @@ public:
 
     inline void start(const Job &job)
     {
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        // scrypt-chacha prints nothing here: the profile line and launch
+        // table come from the all-workers-ready callback
+        // (printScryptChachaLaunch), where the final launch size and the
+        // allocated VRAM / RAM split exist, and each runner logs its tuning
+        // and ready lines at init.
+        if (algo.family() == Algorithm::SCRYPT_CHACHA) {
+            scryptChachaRows.assign(threads.size(), ScryptChachaReadyRow());
+
+            OclSharedState::start(threads, job);
+
+            status.start(threads.size());
+            workers.start(threads);
+
+            return;
+        }
+#       endif
+
         LOG_INFO("%s use profile " BLUE_BG(WHITE_BOLD_S " %s ") WHITE_BOLD_S " (" CYAN_BOLD("%zu") WHITE_BOLD(" thread%s)") " scratchpad " CYAN_BOLD("%zu KB"),
                  Tags::opencl(),
                  profileName.data(),
@@ -225,7 +249,7 @@ public:
                        data.device.printableName().data()
                        );
 
-                    i++;
+            i++;
         }
 
         OclSharedState::start(threads, job);
@@ -233,6 +257,59 @@ public:
         status.start(threads.size());
         workers.start(threads);
     }
+
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Profile line and per-device launch table for scrypt-chacha, printed
+    // from the all-workers-ready callback: by then every runner has
+    // initialized, so INTENSITY is the launched (post back-off) value and the
+    // VRAM / RAM split is the allocation the runner actually made, never an
+    // estimate. The per-work-unit scratchpad footprint depends on the
+    // per-device lookup_gap, so the profile line carries no scratchpad size
+    // (the SCRATCHPAD SIZE column shows the per-device figure). A worker that
+    // failed to start has no row. NAME is the last column so the
+    // variable-width device name never misaligns the fixed columns.
+    inline void printScryptChachaLaunch() const
+    {
+        LOG_INFO("%s use profile " BLUE_BG(WHITE_BOLD_S " %s ") WHITE_BOLD_S " (" CYAN_BOLD("%zu") WHITE_BOLD(" thread%s)"),
+                 Tags::opencl(),
+                 profileName.data(),
+                 threads.size(),
+                 threads.size() > 1 ? "s" : ""
+                 );
+
+        Log::print(WHITE_BOLD("|  # | GPU |  BUS ID | LOOKUP GAP | SCRATCHPAD SIZE | WORKSIZE | INTENSITY | VRAM MiB | RAM MiB | TOTAL MiB | NAME"));
+
+        size_t i = 0;
+        for (const auto &data : threads) {
+            if (i >= scryptChachaRows.size() || !scryptChachaRows[i].valid) {
+                i++;
+                continue;
+            }
+
+            const auto &row = scryptChachaRows[i];
+            const uint32_t lookupGap        = data.scryptchacha_lookup_gap > 0 ? data.scryptchacha_lookup_gap : 1;
+            const uint64_t perWorkUnitBytes = scrypt_chacha::perWorkUnitScratchpadBytes(lookupGap);
+
+            Log::print("|" CYAN_BOLD("%3zu") " |" CYAN_BOLD("%4u") " |" YELLOW(" %7s") " |" CYAN_BOLD("%11u") " |" CYAN("%12" PRIu64 " MiB") " |"
+                       CYAN_BOLD("%9u") " |" CYAN_BOLD("%10zu") " |" CYAN("%9" PRIu64) " |" CYAN("%8" PRIu64) " |" CYAN("%10" PRIu64) " | " GREEN_BOLD("%s"),
+                       i,
+                       data.thread.index(),
+                       data.device.topology().toString().data(),
+                       lookupGap,
+                       perWorkUnitBytes / oneMiB,
+                       data.scryptchacha_worksize,
+                       row.intensity,
+                       row.vramBytes / oneMiB,
+                       row.ramBytes / oneMiB,
+                       (row.vramBytes + row.ramBytes) / oneMiB,
+                       data.device.printableName().data()
+                       );
+
+            i++;
+        }
+    }
+#   endif
 
 
 #   ifdef XMRIG_FEATURE_ADL
@@ -270,6 +347,21 @@ public:
     std::vector<OclLaunchData> threads;
     String profileName;
     Workers<OclLaunchData> workers;
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // One row per worker for the deferred scrypt-chacha launch table, indexed
+    // by worker id (= position in threads) and collected under the callback
+    // mutex as each worker reports ready.
+    struct ScryptChachaReadyRow
+    {
+        bool valid          = false;
+        size_t intensity    = 0;
+        uint64_t vramBytes  = 0;
+        uint64_t ramBytes   = 0;
+    };
+
+    std::vector<ScryptChachaReadyRow> scryptChachaRows;
+#   endif
 };
 
 
@@ -449,7 +541,26 @@ void xmrig::OclBackend::start(IWorker *worker, bool ready)
 {
     mutex.lock();
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Collect this worker's final launch size and allocated VRAM / RAM split
+    // for the deferred launch table, printed below once the last worker
+    // arrives.
+    if (ready && d_ptr->algo.family() == Algorithm::SCRYPT_CHACHA && worker->id() < d_ptr->scryptChachaRows.size()) {
+        auto &row     = d_ptr->scryptChachaRows[worker->id()];
+        row.valid     = true;
+        row.intensity = worker->intensity();
+
+        static_cast<OclWorker *>(worker)->scryptChachaLaunchInfo(row.vramBytes, row.ramBytes);
+    }
+#   endif
+
     if (d_ptr->status.started(ready)) {
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        if (d_ptr->algo.family() == Algorithm::SCRYPT_CHACHA) {
+            d_ptr->printScryptChachaLaunch();
+        }
+#       endif
+
         d_ptr->status.print();
 
         OclWorker::ready = true;
@@ -470,6 +581,18 @@ void xmrig::OclBackend::stop()
     }
 
     const uint64_t ts = Chrono::steadyMSecs();
+
+    // Abort any in-flight GPU launch before joining the worker threads below
+    // (workers.stop() deletes each Thread, which joins it). A scrypt-chacha
+    // launch can run for seconds, so without this the join blocks until the
+    // kernel finishes and Ctrl+C appears to hang. This reuses the new-job path:
+    // it arms each runner's device-side stop flag (jobEarlyNotification), which
+    // the ROMix kernel polls, so the in-flight run() returns within a fraction of
+    // a launch. Nonce::stop() has already zeroed the sequence (Miner::stop), so
+    // the worker loop then exits instead of starting another launch. Passing a
+    // default Job is safe: every runner's jobEarlyNotification ignores the job and
+    // only arms the flag. This mirrors CudaBackend::stop.
+    d_ptr->workers.jobEarlyNotification(Job());
 
     d_ptr->workers.stop();
     d_ptr->threads.clear();

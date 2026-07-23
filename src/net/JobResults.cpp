@@ -59,6 +59,7 @@
 #endif
 
 
+#include <atomic>
 #include <cassert>
 #include <list>
 #include <memory>
@@ -90,14 +91,25 @@ public:
 class JobBaton : public Baton<uv_work_t>
 {
 public:
-    inline JobBaton(std::list<JobBundle> &&bundles, IJobResultListener *listener, bool hwAES) :
+    inline JobBaton(std::list<JobBundle> &&bundles, IJobResultListener *listener, std::shared_ptr<std::atomic_bool> listenerAlive, bool hwAES) :
         hwAES(hwAES),
         listener(listener),
+        listenerAlive(std::move(listenerAlive)),
         bundles(std::move(bundles))
     {}
 
     const bool hwAES;
     IJobResultListener *listener;
+
+    // Set false when the listener is destroyed, which happens while this baton
+    // can still be in flight: the re-verify below runs on the libuv thread
+    // pool, so a shutdown started meanwhile tears the listener down without
+    // waiting for it. Both callbacks consult this before touching the listener
+    // pointer, and the verify loop consults it to stop hashing early. The
+    // shared_ptr keeps the flag itself alive past the listener, and the flag is
+    // atomic because it is set on the loop thread and read on a pool thread.
+    std::shared_ptr<std::atomic_bool> listenerAlive;
+
     std::list<JobBundle> bundles;
     std::vector<JobResult> results;
     uint32_t errors = 0;
@@ -116,7 +128,7 @@ static inline void checkHash(const JobBundle &bundle, std::vector<JobResult> &re
 }
 
 
-static void getResults(JobBundle &bundle, std::vector<JobResult> &results, uint32_t &errors, bool hwAES)
+static void getResults(JobBundle &bundle, std::vector<JobResult> &results, uint32_t &errors, bool hwAES, const std::atomic_bool &listenerAlive)
 {
     const auto &algorithm = bundle.job.algorithm();
 
@@ -134,8 +146,18 @@ static void getResults(JobBundle &bundle, std::vector<JobResult> &results, uint3
 
         size_t accepted       = 0;
         size_t false_positive = 0;
+        bool aborted          = false;
 
         for (uint32_t nonce : bundle.nonces) {
+            // One scrypt-chacha re-verify is a full 512 MiB ROMix walk, seconds
+            // of CPU per candidate, so a batch can outlast the shutdown that
+            // destroys the listener. Nothing consumes the shares once that
+            // happens, so stop hashing instead of holding the miner open.
+            if (!listenerAlive.load(std::memory_order_relaxed)) {
+                aborted = true;
+                break;
+            }
+
             *bundle.job.nonce() = nonce;
 
             scrypt_chacha::hash(bundle.job.blob(), bundle.job.size(), hash, ctx, bundle.job.height());
@@ -169,11 +191,15 @@ static void getResults(JobBundle &bundle, std::vector<JobResult> &results, uint3
             accepted++;
         }
 
-        LOG_VERBOSE("%s scrypt-chacha GPU #%u verify: %zu candidate%s -> %zu share%s (%zu prefilter false positive%s)",
-                    backend_tag(bundle.job.backend()), bundle.device_index,
-                    bundle.nonces.size(), bundle.nonces.size() == 1 ? "" : "s",
-                    accepted, accepted == 1 ? "" : "s",
-                    false_positive, false_positive == 1 ? "" : "s");
+        // An aborted batch has no meaningful tally to report, and the log is
+        // being torn down alongside the listener it was abandoned for.
+        if (!aborted) {
+            LOG_VERBOSE("%s scrypt-chacha GPU #%u verify: %zu candidate%s -> %zu share%s (%zu prefilter false positive%s)",
+                        backend_tag(bundle.job.backend()), bundle.device_index,
+                        bundle.nonces.size(), bundle.nonces.size() == 1 ? "" : "s",
+                        accepted, accepted == 1 ? "" : "s",
+                        false_positive, false_positive == 1 ? "" : "s");
+        }
 
         scrypt_chacha::releaseCtx(ctx);
         delete memory;
@@ -275,7 +301,15 @@ public:
     }
 
 
-    ~JobResultsPrivate() override = default;
+    inline ~JobResultsPrivate() override
+    {
+#       if defined(XMRIG_FEATURE_OPENCL) || defined(XMRIG_FEATURE_CUDA)
+        // ~Network destroys the listener right after JobResults::stop() deletes
+        // this object, so any baton still on the thread pool must be told that
+        // its results have nowhere to go.
+        m_listenerAlive->store(false, std::memory_order_relaxed);
+#       endif
+    }
 
 
     inline void submit(const JobResult &result)
@@ -322,21 +356,31 @@ private:
             return;
         }
 
-        auto baton = new JobBaton(std::move(bundles), m_listener, m_hwAES);
+        auto baton = new JobBaton(std::move(bundles), m_listener, m_listenerAlive, m_hwAES);
 
         uv_queue_work(uv_default_loop(), &baton->req,
             [](uv_work_t *req) {
                 auto baton = static_cast<JobBaton*>(req->data);
 
                 for (JobBundle &bundle : baton->bundles) {
-                    getResults(bundle, baton->results, baton->errors, baton->hwAES);
+                    if (!baton->listenerAlive->load(std::memory_order_relaxed)) {
+                        break;
+                    }
+
+                    getResults(bundle, baton->results, baton->errors, baton->hwAES, *baton->listenerAlive);
                 }
             },
             [](uv_work_t *req, int) {
                 auto baton = static_cast<JobBaton*>(req->data);
 
-                for (const auto &result : baton->results) {
-                    baton->listener->onJobResult(result);
+                // This runs on the loop thread after the verify finishes, which
+                // can be long after a shutdown destroyed the listener. The flag
+                // is cleared on this same thread, so reading it here cannot race
+                // with the teardown that clears it.
+                if (baton->listenerAlive->load(std::memory_order_relaxed)) {
+                    for (const auto &result : baton->results) {
+                        baton->listener->onJobResult(result);
+                    }
                 }
 
                 delete baton;
@@ -366,6 +410,7 @@ private:
 
 #   if defined(XMRIG_FEATURE_OPENCL) || defined(XMRIG_FEATURE_CUDA)
     std::list<JobBundle> m_bundles;
+    std::shared_ptr<std::atomic_bool> m_listenerAlive = std::make_shared<std::atomic_bool>(true);
 #   endif
 };
 

@@ -44,7 +44,15 @@ xmrig::OclLaunchData::OclLaunchData(const Miner *miner, const Algorithm &algorit
 bool xmrig::OclLaunchData::isEqual(const OclLaunchData &other) const
 {
     return (other.algorithm == algorithm &&
-            other.thread    == thread);
+            other.thread    == thread
+#           ifdef XMRIG_ALGO_SCRYPT_CHACHA
+            && other.scryptchacha_lookup_gap         == scryptchacha_lookup_gap
+            && other.scryptchacha_worksize           == scryptchacha_worksize
+            && other.scryptchacha_use_system_ram     == scryptchacha_use_system_ram
+            && other.scryptchacha_reserve_vram_mb    == scryptchacha_reserve_vram_mb
+            && other.scryptchacha_host_ram_budget_mb == scryptchacha_host_ram_budget_mb
+#           endif
+            );
 }
 
 

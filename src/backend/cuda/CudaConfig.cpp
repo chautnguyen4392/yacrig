@@ -124,9 +124,14 @@ std::vector<xmrig::CudaLaunchData> xmrig::CudaConfig::get(const Miner *miner, co
 
 #       ifdef XMRIG_ALGO_SCRYPT_CHACHA
         if (algorithm.family() == Algorithm::SCRYPT_CHACHA) {
+            // Resolve the effective per-GPU tuning: a knob pinned on the
+            // thread wins over the global "cuda" field. lookup_gap is clamped
+            // here at the merge, like on the OpenCL backend, so everything
+            // downstream (the launch table, the memory-split math, the
+            // plugin) reads a valid gap.
             auto &launch = out.back();
-            launch.scryptchacha_lookup_gap         = thread.hasLookupGap()        ? thread.lookupGap()         : m_lookup_gap;
-            launch.scryptchacha_use_system_ram     = thread.hasUseSystemRam()     ? thread.useSystemRam()      : m_use_system_ram;
+            launch.scryptchacha_lookup_gap         = std::max(thread.hasLookupGap() ? thread.lookupGap() : m_lookup_gap, 1);
+            launch.scryptchacha_use_system_ram     = thread.hasUseSystemRam() ? thread.useSystemRam() : m_use_system_ram;
             launch.scryptchacha_reserve_vram_mb    = thread.hasReserveVramMb()    ? thread.reserveVramMb()     : m_reserve_vram_mb;
             launch.scryptchacha_host_ram_budget_mb = thread.hasHostRamBudgetMb() ? thread.hostRamBudgetMb()    : m_default_host_ram_budget_mb_per_gpu;
         }
@@ -243,6 +248,7 @@ void xmrig::CudaConfig::generate()
 void xmrig::CudaConfig::setupScryptChacha(const std::vector<CudaDevice> &devices)
 {
     struct Tuning {
+        bool mines;
         int  lookup_gap;
         bool use_system_ram;
         int  reserve_vram_mb;
@@ -262,21 +268,35 @@ void xmrig::CudaConfig::setupScryptChacha(const std::vector<CudaDevice> &devices
         return nullptr;
     };
 
+    // Only the GPUs that will actually mine take part in the host-RAM budget
+    // math. When a "scrypt-chacha" array is present (Case B) generation is
+    // skipped for the whole family, so a device with no entry runs no worker
+    // and claims no host RAM: it must not dilute the per-GPU default share nor
+    // count toward the over-subscription guard. With no array (Case A) the
+    // generator autotunes every enumerated GPU, so all of them mine.
+    const bool arrayPresent = !threadList.isEmpty();
+
     // Resolve every device's effective tuning once. host_ram_budget_mb is
-    // resolved later, once the per-GPU default budget is known.
+    // resolved later, once the per-GPU default budget is known. tuning stays
+    // aligned with devices so the ctx-push loop below can index it directly.
     std::vector<Tuning> tuning;
     tuning.reserve(devices.size());
-    bool any_system_ram = false;
+    bool   any_system_ram      = false;
+    size_t mining_device_count = 0;
     for (const auto &d : devices) {
         const CudaThread *t = threadFor(d.index());
         Tuning tn;
+        tn.mines                 = !arrayPresent || t != nullptr;
         tn.lookup_gap            = (t && t->hasLookupGap())       ? t->lookupGap()       : m_lookup_gap;
         tn.use_system_ram        = (t && t->hasUseSystemRam())    ? t->useSystemRam()    : m_use_system_ram;
         tn.reserve_vram_mb       = (t && t->hasReserveVramMb())   ? t->reserveVramMb()   : m_reserve_vram_mb;
         tn.has_host_ram_override = t && t->hasHostRamBudgetMb();
         tn.host_ram_override_mb  = tn.has_host_ram_override       ? t->hostRamBudgetMb() : 0;
 
-        any_system_ram = any_system_ram || tn.use_system_ram;
+        if (tn.mines) {
+            ++mining_device_count;
+            any_system_ram = any_system_ram || tn.use_system_ram;
+        }
         tuning.push_back(tn);
     }
 
@@ -290,32 +310,38 @@ void xmrig::CudaConfig::setupScryptChacha(const std::vector<CudaDevice> &devices
 
         // A global host_ram_budget_mb (> 0) caps the system RAM all GPUs
         // together may use, split evenly. 0 falls back to the full
-        // MemAvailable-minus-reserve budget. Either way the total must fit in
-        // physical host RAM.
+        // MemAvailable-minus-reserve budget. A cap the host cannot actually
+        // provide is clamped to that same fallback (loudly): mining continues
+        // within physical RAM, the reserve stays intact, and nothing
+        // over-subscribes.
         size_t configured_budget_mb = total_budget_mb;
         if (m_host_ram_budget_mb > 0) {
             if (static_cast<size_t>(m_host_ram_budget_mb) > total_budget_mb) {
-                LOG_ERR("%s scrypt-chacha: global host_ram_budget_mb=%d MB exceeds the %zu MB "
-                        "available (MemAvailable=%zu MB, reserve_ram_mb=%d MB).",
-                        cuda_tag(), m_host_ram_budget_mb, total_budget_mb, mem_avail_mb, m_reserve_ram_mb);
-                throw std::runtime_error("scrypt-chacha host_ram_budget over-subscribed");
+                LOG_ERR("%s scrypt-chacha: global host_ram_budget_mb=%d MiB exceeds the %zu MiB "
+                        "available (MemAvailable=%zu MiB, reserve_ram_mb=%d MiB), clamping to %zu MiB.",
+                        cuda_tag(), m_host_ram_budget_mb, total_budget_mb, mem_avail_mb, m_reserve_ram_mb, total_budget_mb);
             }
-            configured_budget_mb = static_cast<size_t>(m_host_ram_budget_mb);
+            else {
+                configured_budget_mb = static_cast<size_t>(m_host_ram_budget_mb);
+            }
         }
 
-        m_default_host_ram_budget_mb_per_gpu = devices.empty()
+        m_default_host_ram_budget_mb_per_gpu = mining_device_count == 0
             ? 0
-            : static_cast<int>(configured_budget_mb / devices.size());
+            : static_cast<int>(configured_budget_mb / mining_device_count);
 
-        LOG_VERBOSE("%s scrypt-chacha CUDA host RAM: MemAvailable %zu MB, reserve_ram %d MB, budget %zu MB, per-GPU default %d MB (%zu device%s)",
+        LOG_VERBOSE("%s scrypt-chacha host RAM: MemAvailable %zu MiB, reserve_ram %d MiB, budget %zu MiB, per-GPU default %d MiB (%zu mining device%s)",
                     cuda_tag(), mem_avail_mb, m_reserve_ram_mb, configured_budget_mb,
-                    m_default_host_ram_budget_mb_per_gpu, devices.size(), devices.size() > 1 ? "s" : "");
+                    m_default_host_ram_budget_mb_per_gpu, mining_device_count, mining_device_count > 1 ? "s" : "");
 
-        // Sum the per-GPU host RAM each system-RAM device will claim and refuse
-        // to start if it over-subscribes the budget.
+        // Sum the per-GPU host RAM each system-RAM device will claim. The
+        // unpinned shares cannot exceed the budget by construction, so an
+        // over-subscribed sum means absolute per-device pins that physical RAM
+        // cannot back. That is a fatal misconfiguration: log it and abort
+        // rather than start mining with a budget the host cannot honour.
         size_t sum_requested_mb = 0;
         for (const auto &tn : tuning) {
-            if (!tn.use_system_ram) {
+            if (!tn.mines || !tn.use_system_ram) {
                 continue;
             }
             const int hrb = tn.has_host_ram_override ? tn.host_ram_override_mb
@@ -325,10 +351,11 @@ void xmrig::CudaConfig::setupScryptChacha(const std::vector<CudaDevice> &devices
             }
         }
         if (sum_requested_mb > total_budget_mb) {
-            LOG_ERR("%s scrypt-chacha CUDA: per-GPU host_ram_budget_mb sums to %zu MB but only "
-                    "%zu MB is available (MemAvailable=%zu MB, reserve_ram_mb=%d MB).",
+            LOG_ERR("%s scrypt-chacha: per-GPU host_ram_budget_mb sums to %zu MiB but only "
+                    "%zu MiB is available (MemAvailable=%zu MiB, reserve_ram_mb=%d MiB), aborting.",
                     cuda_tag(), sum_requested_mb, total_budget_mb, mem_avail_mb, m_reserve_ram_mb);
-            throw std::runtime_error("scrypt-chacha host_ram_budget over-subscribed");
+
+            throw std::runtime_error("scrypt-chacha: per-GPU host_ram_budget_mb over-subscribes system RAM");
         }
     }
 
@@ -338,18 +365,17 @@ void xmrig::CudaConfig::setupScryptChacha(const std::vector<CudaDevice> &devices
 
     // Push the effective tuning to each device's autotune ctx. The host RAM
     // budget is zero unless that device uses system RAM, so the plugin sizes
-    // MAXWARPS_RAM from a real budget only when system RAM is in play.
+    // MAXWARPS_RAM from a real budget only when system RAM is in play. The
+    // per-device tuning line prints once, from the runner's configureCtx,
+    // which pushes these same merged values to the runner ctx.
     for (size_t i = 0; i < devices.size(); ++i) {
-        const auto &tn  = tuning[i];
-        const int   hrb = tn.use_system_ram
+        const auto &tn      = tuning[i];
+        const bool  use_ram = tn.use_system_ram;
+        const int   hrb     = use_ram
             ? (tn.has_host_ram_override ? tn.host_ram_override_mb : m_default_host_ram_budget_mb_per_gpu)
             : 0;
-        CudaLib::scryptChachaConfig(devices[i].ctx(), tn.lookup_gap, tn.use_system_ram,
+        CudaLib::scryptChachaConfig(devices[i].ctx(), tn.lookup_gap, use_ram,
                                     tn.reserve_vram_mb, hrb);
-
-        LOG_VERBOSE("%s" CYAN_BOLD(" #%u") " scrypt-chacha CUDA autotune tuning: lookup_gap %d, system_ram %s, reserve_vram %d MiB, host_ram_budget %d MiB",
-                    cuda_tag(), devices[i].index(), tn.lookup_gap, tn.use_system_ram ? "on" : "off",
-                    tn.reserve_vram_mb, hrb);
     }
 }
 #endif

@@ -61,6 +61,7 @@ public:
     OclDevice(uint32_t index, cl_device_id id, cl_platform_id platform);
 
     String printableName() const;
+    size_t freeMemSizeAmd() const;
     uint32_t clock() const;
     void generate(const Algorithm &algorithm, OclThreads &threads) const;
 

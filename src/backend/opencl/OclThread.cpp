@@ -39,6 +39,13 @@ static const char *kGCNAsm       = "gcn_asm";
 static const char* kDatasetHost  = "dataset_host";
 #endif
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+static const char *kLookupGap       = "lookup_gap";
+static const char *kUseSystemRam    = "use_system_ram";
+static const char *kReserveVramMb   = "reserve_vram_mb";
+static const char *kHostRamBudgetMb = "host_ram_budget_mb";
+#endif
+
 } // namespace xmrig
 
 
@@ -88,6 +95,41 @@ xmrig::OclThread::OclThread(const rapidjson::Value &value)
         m_datasetHost = Json::getBool(value, kDatasetHost, m_datasetHost);
     }
 #   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Each knob is pinned independently: a key that is present sets its has*
+    // discriminator, a key that is absent leaves the knob to OclConfig's
+    // global default when the launch data is built.
+    m_hasWorksize = Json::getValue(value, kWorksize).IsUint();
+
+    const auto &lookupGap = Json::getValue(value, kLookupGap);
+    if (lookupGap.IsUint()) {
+        m_fields.set(SCRYPT_CHACHA_FIELDS, true);
+        m_hasLookupGap = true;
+        m_lookupGap    = lookupGap.GetUint();
+    }
+
+    const auto &useSystemRam = Json::getValue(value, kUseSystemRam);
+    if (useSystemRam.IsBool()) {
+        m_fields.set(SCRYPT_CHACHA_FIELDS, true);
+        m_hasUseSystemRam = true;
+        m_useSystemRam    = useSystemRam.GetBool();
+    }
+
+    const auto &reserveVramMb = Json::getValue(value, kReserveVramMb);
+    if (reserveVramMb.IsUint()) {
+        m_fields.set(SCRYPT_CHACHA_FIELDS, true);
+        m_hasReserveVramMb = true;
+        m_reserveVramMb    = reserveVramMb.GetUint();
+    }
+
+    const auto &hostRamBudgetMb = Json::getValue(value, kHostRamBudgetMb);
+    if (hostRamBudgetMb.IsUint()) {
+        m_fields.set(SCRYPT_CHACHA_FIELDS, true);
+        m_hasHostRamBudgetMb = true;
+        m_hostRamBudgetMb    = hostRamBudgetMb.GetUint();
+    }
+#   endif
 }
 
 
@@ -103,7 +145,16 @@ bool xmrig::OclThread::isEqual(const OclThread &other) const
            other.m_memChunk     == m_memChunk &&
            other.m_stridedIndex == m_stridedIndex &&
            other.m_unrollFactor == m_unrollFactor &&
-           other.m_worksize     == m_worksize;
+           other.m_worksize     == m_worksize &&
+           other.m_hasLookupGap       == m_hasLookupGap &&
+           other.m_hasWorksize        == m_hasWorksize &&
+           other.m_hasUseSystemRam    == m_hasUseSystemRam &&
+           other.m_hasReserveVramMb   == m_hasReserveVramMb &&
+           other.m_hasHostRamBudgetMb == m_hasHostRamBudgetMb &&
+           other.m_useSystemRam == m_useSystemRam &&
+           other.m_lookupGap    == m_lookupGap &&
+           other.m_reserveVramMb   == m_reserveVramMb &&
+           other.m_hostRamBudgetMb == m_hostRamBudgetMb;
 }
 
 
@@ -140,6 +191,16 @@ rapidjson::Value xmrig::OclThread::toJSON(rapidjson::Document &doc) const
         out.AddMember(StringRef(kBFactor),      bfactor(), allocator);
         out.AddMember(StringRef(kGCNAsm),       isAsm(), allocator);
         out.AddMember(StringRef(kDatasetHost),  isDatasetHost(), allocator);
+#       endif
+    }
+    else if (m_fields.test(SCRYPT_CHACHA_FIELDS)) {
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        // Only pinned knobs are written back, so an autotune-generated thread
+        // keeps following the global "opencl" settings after a config save.
+        if (m_hasLookupGap)       { out.AddMember(StringRef(kLookupGap),       lookupGap(),       allocator); }
+        if (m_hasUseSystemRam)    { out.AddMember(StringRef(kUseSystemRam),    useSystemRam(),    allocator); }
+        if (m_hasReserveVramMb)   { out.AddMember(StringRef(kReserveVramMb),   reserveVramMb(),   allocator); }
+        if (m_hasHostRamBudgetMb) { out.AddMember(StringRef(kHostRamBudgetMb), hostRamBudgetMb(), allocator); }
 #       endif
     }
     else if (!m_fields.test(KAWPOW_FIELDS)) {

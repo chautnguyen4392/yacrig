@@ -68,6 +68,19 @@ public:
     const OclPlatform platform;
     const OclThread thread;
     const uint32_t benchSize = 0;
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Effective per-GPU scrypt-chacha tuning, resolved by OclConfig::get()
+    // (a knob pinned on the thread wins over the global "opencl" field). The
+    // runner and the backend log read these, never the raw thread fields,
+    // because a thread only stores the knobs the user spelled out.
+    // scryptchacha_host_ram_budget_mb is already this GPU's absolute share.
+    uint32_t scryptchacha_lookup_gap         = 32;
+    uint32_t scryptchacha_worksize           = 32;
+    bool     scryptchacha_use_system_ram     = false;
+    uint32_t scryptchacha_reserve_vram_mb    = 0;
+    uint32_t scryptchacha_host_ram_budget_mb = 0;
+#   endif
 };
 
 

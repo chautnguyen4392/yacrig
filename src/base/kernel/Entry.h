@@ -41,6 +41,7 @@ public:
         Version,
         Topo,
         Platforms,
+        Devices,
         ScryptChachaTest
     };
 

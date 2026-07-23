@@ -55,6 +55,10 @@ extern bool ocl_generic_rx_generator(const OclDevice &device, const Algorithm &a
 extern bool ocl_generic_kawpow_generator(const OclDevice& device, const Algorithm& algorithm, OclThreads& threads);
 #endif
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+extern bool ocl_scrypt_chacha_generator(const OclDevice &device, const Algorithm &algorithm, OclThreads &threads);
+#endif
+
 extern bool ocl_vega_cn_generator(const OclDevice &device, const Algorithm &algorithm, OclThreads &threads);
 extern bool ocl_generic_cn_generator(const OclDevice &device, const Algorithm &algorithm, OclThreads &threads);
 
@@ -65,6 +69,9 @@ static ocl_gen_config_fun generators[] = {
 #   endif
 #   ifdef XMRIG_ALGO_KAWPOW
     ocl_generic_kawpow_generator,
+#   endif
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    ocl_scrypt_chacha_generator,
 #   endif
     ocl_vega_cn_generator,
     ocl_generic_cn_generator
@@ -163,6 +170,27 @@ xmrig::String xmrig::OclDevice::printableName() const
     }
 
     return fmt::format(GREEN_BOLD("{}") " (" CYAN_BOLD("{}") ")", m_board, m_name).c_str();
+}
+
+
+// Currently free (not total) global memory, in bytes, from the AMD
+// cl_amd_device_attribute_query extension. CL_DEVICE_GLOBAL_FREE_MEMORY_AMD
+// returns up to 4 size_t values in KB; the first is the total free memory.
+// Returns 0 when the extension is absent or the query fails, so callers can
+// fall back to globalMemSize() minus a reserve margin. Note freeMemSize() is
+// NOT this: it is min(maxMemAllocSize, globalMemSize), an allocation bound.
+size_t xmrig::OclDevice::freeMemSizeAmd() const
+{
+    if (!m_extensions.contains("cl_amd_device_attribute_query")) {
+        return 0;
+    }
+
+    size_t freeMemKb[4] = {};
+    if (OclLib::getDeviceInfo(id(), CL_DEVICE_GLOBAL_FREE_MEMORY_AMD, sizeof(freeMemKb), freeMemKb) != CL_SUCCESS) {
+        return 0;
+    }
+
+    return freeMemKb[0] * 1024;
 }
 
 

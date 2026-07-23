@@ -49,6 +49,10 @@ public:
     inline void add(OclThread &&thread)                     { m_data.push_back(thread); }
     inline void reserve(size_t capacity)                    { m_data.reserve(capacity); }
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    inline void setScryptChachaFields()                     { for (auto &thread : m_data) { thread.setScryptChachaFields(); } }
+#   endif
+
     inline bool operator!=(const OclThreads &other) const   { return !isEqual(other); }
     inline bool operator==(const OclThreads &other) const   { return isEqual(other); }
 

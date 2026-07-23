@@ -27,9 +27,6 @@
 #include "net/JobResult.h"
 
 
-#include <mutex>
-
-
 namespace xmrig {
 
 
@@ -49,52 +46,29 @@ public:
 
     static std::atomic<bool> ready;
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Final launch geometry and allocated scratchpad split of this worker's
+    // runner (valid once the worker reported ready). Zeroes for every other
+    // algorithm family. CudaBackend reads it for the launch table printed at
+    // all-workers-ready. The OpenCL twin (OclWorker::scryptChachaLaunchInfo)
+    // carries only the memory split, since OpenCL keeps its geometry
+    // (intensity, worksize) in the launch data.
+    void scryptChachaLaunchInfo(uint32_t &launchThreads, uint32_t &launchBlocks, uint64_t &vramBytes, uint64_t &ramBytes) const;
+#   endif
+
 protected:
     bool selfTest() override;
     size_t intensity() const override;
     void start() override;
-    void hashrateData(uint64_t &hashCount, uint64_t &timeStamp, uint64_t &rawHashes) const override;
 
 private:
     bool consumeJob();
     void storeStats();
 
-    // scrypt-chacha hashrate projection helpers (see the m_proj* members below).
-    void beginProjection(uint64_t launchStart);
-    void advanceProjection(uint64_t launchMs);
-    void commitAbortedProjection();
-
-    // scrypt-chacha per-launch log lines. Message formatting only; the
-    // projection state is updated by the helpers above.
-    void logScryptChachaStart(uint32_t startNonce) const;
-    void logScryptChachaSkipped(uint32_t startNonce) const;
-    void logScryptChachaDone(uint32_t startNonce, uint64_t workUnits, uint64_t launchMs) const;
-
     const Algorithm m_algorithm;
     const Miner *m_miner;
     ICudaRunner *m_runner = nullptr;
     WorkerJob<1> m_job;
-
-    // scrypt-chacha hashrate projection. A single launch runs for minutes, far
-    // longer than the 10s/60s sampling windows, so storeStats records only one
-    // point per launch and every window reads stale (speed stays n/a). The tick
-    // thread instead reads a smooth, continuous display count that ramps at the
-    // measured per-launch rate while run() blocks.
-    //
-    // The display count is deliberately decoupled from m_count's per-launch
-    // steps: it only ever advances by the projection itself. The first projected
-    // launch ramps from 0 (no jump to the first launch's full total), and each
-    // launch continues from exactly where the previous one's projection ended,
-    // so the warm-up handoff and launch boundaries introduce no count
-    // discontinuity. A discontinuity would briefly look like a faster-than-real
-    // rate to the sampler and pollute the running max. The absolute value is
-    // irrelevant (only the slope drives the displayed H/s), so starting at 0 is
-    // fine; nonce striding uses intensity()/roundSize(), not this count.
-    mutable std::mutex m_projLock;
-    uint64_t m_projBase      = 0;   // display count at the current launch's start
-    uint64_t m_projStart     = 0;   // current launch start (steadyMSecs)
-    uint64_t m_projWorkUnits = 0;   // work units the current launch adds
-    uint64_t m_projEstMs     = 0;   // rate denominator: the previous launch's duration (0 until the first completes)
 };
 
 

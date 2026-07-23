@@ -45,8 +45,21 @@ static constexpr size_t   kHeaderBytes     = 84;                       // YAC v7
 static constexpr size_t   kOutputSize      = 32;
 
 
-// Forward declaration; the concrete layout is added together with the
-// real ROMix-based implementation in a later step.
+// Per-work-unit GPU scratchpad footprint at a given lookup_gap: the GPU
+// kernels store every lookup_gap-th ROMix checkpoint, so one work unit needs
+// ceil(kN / lookup_gap) chunks of kChunkBytes (128 B). lookup_gap 1 stores
+// every checkpoint (= kScratchpadBytes, 512 MiB); the common gaps 64/32/16/8
+// give 8/16/32/64 MiB. Single source for both GPU backends' launch tables,
+// the OpenCL generator and runner, and the CUDA memory-split math, so every
+// reported footprint agrees. Callers pass lookupGap >= 1 (their merge paths
+// clamp it).
+static constexpr size_t perWorkUnitScratchpadBytes(uint32_t lookupGap)
+{
+    return static_cast<size_t>((kN + lookupGap - 1) / lookupGap) * kChunkBytes;
+}
+
+
+// Forward declaration; the concrete layout lives in ScryptChachaCtx.h.
 struct ScryptChachaCtx;
 
 

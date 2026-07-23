@@ -36,7 +36,20 @@ public:
     CudaThread(const rapidjson::Value &value);
     CudaThread(uint32_t index, nvid_ctx *ctx);
 
-    inline bool isValid() const                              { return m_blocks > 0 && m_threads > 0; }
+    // threads/blocks -1/-1 is the scrypt-chacha auto marker (normalised by the
+    // JSON constructor): an entry that pins tuning knobs may omit the launch
+    // geometry and the plugin autotunes it at runner init from the merged
+    // tuning. Every other family still requires positive geometry.
+    inline bool isValid() const
+    {
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        if (hasScryptChachaPins() && m_blocks == -1 && m_threads == -1) {
+            return true;
+        }
+#       endif
+        return m_blocks > 0 && m_threads > 0;
+    }
+
     inline int32_t bfactor() const                           { return static_cast<int32_t>(m_bfactor); }
     inline int32_t blocks() const                            { return m_blocks; }
     inline int32_t bsleep() const                            { return static_cast<int32_t>(m_bsleep); }
@@ -53,6 +66,7 @@ public:
     inline bool hasUseSystemRam() const      { return m_has_use_system_ram; }
     inline bool hasReserveVramMb() const     { return m_has_reserve_vram_mb; }
     inline bool hasHostRamBudgetMb() const   { return m_has_host_ram_budget_mb; }
+    inline bool hasScryptChachaPins() const  { return m_has_lookup_gap || m_has_use_system_ram || m_has_reserve_vram_mb || m_has_host_ram_budget_mb; }
     inline int  lookupGap() const            { return m_lookup_gap; }
     inline bool useSystemRam() const         { return m_use_system_ram; }
     inline int  reserveVramMb() const        { return m_reserve_vram_mb; }

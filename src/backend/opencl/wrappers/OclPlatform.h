@@ -47,6 +47,7 @@ public:
 
     static std::vector<OclPlatform> get();
     static void print();
+    static void printDevices();
 
     inline bool isValid() const      { return m_id != nullptr; }
     inline cl_platform_id id() const { return m_id; }

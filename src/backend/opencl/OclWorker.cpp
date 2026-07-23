@@ -39,6 +39,10 @@
 #   include "backend/opencl/runners/OclKawPowRunner.h"
 #endif
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "backend/opencl/runners/OclScryptChachaRunner.h"
+#endif
+
 #include <cassert>
 #include <thread>
 
@@ -92,6 +96,12 @@ xmrig::OclWorker::OclWorker(size_t id, const OclLaunchData &data) :
 #       endif
         break;
 
+    case Algorithm::SCRYPT_CHACHA:
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        m_runner = new OclScryptChachaRunner(id, data);
+#       endif
+        break;
+
     default:
         m_runner = new OclCnRunner(id, data);
         break;
@@ -140,6 +150,24 @@ size_t xmrig::OclWorker::intensity() const
 }
 
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+void xmrig::OclWorker::scryptChachaLaunchInfo(uint64_t &vramBytes, uint64_t &ramBytes) const
+{
+    vramBytes = 0;
+    ramBytes  = 0;
+
+    // The runner behind a SCRYPT_CHACHA worker is always the scrypt-chacha
+    // runner (see the constructor's algorithm switch), so the cast is safe.
+    if (m_algorithm.family() == Algorithm::SCRYPT_CHACHA && m_runner != nullptr) {
+        const auto *runner = static_cast<const OclScryptChachaRunner *>(m_runner);
+
+        vramBytes = runner->vramScratchpadBytes();
+        ramBytes  = runner->ramScratchpadBytes();
+    }
+}
+#endif
+
+
 void xmrig::OclWorker::start()
 {
     cl_uint results[0x100];
@@ -167,10 +195,17 @@ void xmrig::OclWorker::start()
         while (!Nonce::isOutdated(Nonce::OPENCL, m_job.sequence())) {
             m_sharedData.adjustDelay(id());
 
-            const uint64_t t = Chrono::steadyMSecs();
+            const bool isScryptChacha = m_algorithm.family() == Algorithm::SCRYPT_CHACHA;
+            const uint32_t startNonce = readUnaligned(m_job.nonce());
+            const uint64_t t          = Chrono::steadyMSecs();
+
+            if (isScryptChacha) {
+                beginProjection(t);
+                logScryptChachaStart(ocl_tag(), "OpenCL", startNonce);
+            }
 
             try {
-                m_runner->run(readUnaligned(m_job.nonce()), m_job.nonceOffset(), results);
+                m_runner->run(startNonce, m_job.nonceOffset(), results);
             }
             catch (std::exception &ex) {
                 printError(id(), ex.what());
@@ -178,7 +213,31 @@ void xmrig::OclWorker::start()
                 return;
             }
 
+            // For scrypt-chacha, an early-abort armed before the kernel made
+            // progress skips every work-group and reports processedHashes() == 0.
+            // That zero is the explicit "no work done" signal: such a launch must
+            // not advance the nonce, count toward the hashrate, set the estimated
+            // launch duration, or log a completed-launch line. No work-group ran
+            // to the output stage, so the output buffer holds no candidates.
+            // Treat it as a no-op and retry the same nonce range.
+            if (isScryptChacha && m_runner->processedHashes() == 0) {
+                logScryptChachaSkipped(ocl_tag(), "OpenCL", startNonce);
+                commitAbortedProjection();
+                std::this_thread::yield();
+                continue;
+            }
+
+            if (isScryptChacha) {
+                const uint64_t launchMs = Chrono::steadyMSecs() - t;
+                advanceProjection(launchMs);
+                logScryptChachaDone(ocl_tag(), "OpenCL", startNonce, intensity(), launchMs);
+            }
+
             if (results[0xFF] > 0) {
+                if (isScryptChacha) {
+                    LOG_VERBOSE("%s" CYAN_BOLD(" #%u") " scrypt-chacha %u candidate%s passed the GPU prefilter, submitting for CPU re-verify",
+                                ocl_tag(), m_deviceIndex, results[0xFF], results[0xFF] > 1 ? "s" : "");
+                }
                 JobResults::submit(m_job.currentJob(), results, results[0xFF], m_deviceIndex);
             }
 

@@ -75,6 +75,15 @@ function kawpow()
     fs.writeFileSync('kawpow_dag_cl.h', text2h(kawpow_dag, 'xmrig', 'kawpow_dag_cl'));
 }
 
+
+function scrypt_chacha()
+{
+    const scrypt = opencl_minify(fs.readFileSync('scrypt-chacha.cl', 'utf8'));
+
+    // fs.writeFileSync('scrypt-chacha_gen.cl', scrypt);
+    fs.writeFileSync('scrypt-chacha_cl.h', text2h(scrypt, 'xmrig', 'scrypt_chacha_cl'));
+}
+
 for (let i = 0; i < 2; i++) {
     if (fs.existsSync('src/backend/opencl/cl/OclSource.h')) {
         break;
@@ -96,3 +105,6 @@ rx();
 
 process.chdir(path.resolve(cwd, 'kawpow'));
 kawpow();
+
+process.chdir(path.resolve(cwd, 'scrypt'));
+scrypt_chacha();

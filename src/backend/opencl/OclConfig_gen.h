@@ -23,6 +23,10 @@
 #include "backend/common/Threads.h"
 #include "backend/opencl/OclThreads.h"
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "backend/opencl/generators/ocl_scrypt_chacha_generator.h"
+#endif
+
 
 #include <algorithm>
 
@@ -134,6 +138,27 @@ template<>
 size_t inline generate<Algorithm::KAWPOW>(Threads<OclThreads>& threads, const std::vector<OclDevice>& devices)
 {
     return generate(Algorithm::kKAWPOW, threads, Algorithm::KAWPOW_RVN, devices);
+}
+#endif
+
+
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+// scrypt-chacha bypasses the generate<FAMILY>() template: its autotune needs
+// the global "opencl" tuning knobs, which the generator dispatch table cannot
+// carry, so OclConfig::generate() resolves them into an OclScryptChachaTuning
+// and calls the tuned generator overload per device.
+static inline size_t generateScryptChacha(Threads<OclThreads> &threads, const std::vector<OclDevice> &devices, const OclScryptChachaTuning &tuning)
+{
+    if (threads.isExist(Algorithm::SCRYPT_CHACHA_YAC) || threads.has(Algorithm::kSCRYPT_CHACHA)) {
+        return 0;
+    }
+
+    OclThreads generated;
+    for (const auto &device : devices) {
+        ocl_scrypt_chacha_generator(device, Algorithm::SCRYPT_CHACHA_YAC, generated, tuning);
+    }
+
+    return threads.move(Algorithm::kSCRYPT_CHACHA, std::move(generated));
 }
 #endif
 

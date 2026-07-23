@@ -42,11 +42,26 @@ bool xmrig::CudaScryptChachaRunner::init()
         return false;
     }
 
+    // Final launch geometry, read back from the runner ctx. For an auto
+    // (-1/-1) thread the plugin's autotune sized the launch during deviceInfo
+    // above; a JSON-pinned thread keeps its configured geometry in the ctx,
+    // so the readback covers both cases (with the config values as fallback).
+    int launchThreads = CudaLib::deviceInt(m_ctx, CudaLib::DeviceThreads);
+    int launchBlocks  = CudaLib::deviceInt(m_ctx, CudaLib::DeviceBlocks);
+    if (launchThreads <= 0) { launchThreads = m_data.thread.threads(); }
+    if (launchBlocks  <= 0) { launchBlocks  = m_data.thread.blocks(); }
+    m_launchThreads = launchThreads > 0 ? static_cast<uint32_t>(launchThreads) : 0;
+    m_launchBlocks  = launchBlocks  > 0 ? static_cast<uint32_t>(launchBlocks)  : 0;
+
     // The theoretical figure is in work units (threads * blocks / THREADS_PER_WU),
-    // matching CudaBackend's launch-config log and the actual count read back
-    // below: otherwise the warning would fire on every Pascal run purely from
-    // the 4x cooperation factor, not a real back-off.
-    const size_t theoretical = m_data.scryptChachaTheoreticalWorkUnits();
+    // matching the actual count read back below: otherwise the warning would
+    // fire on every Pascal run purely from the 4x cooperation factor, not a
+    // real back-off. An auto (-1/-1) thread carries no config-side geometry,
+    // so its theoretical figure comes from the geometry readback above.
+    const bool autoGeometry  = m_data.thread.blocks() < 0 || m_data.thread.threads() < 0;
+    const size_t theoretical = autoGeometry
+        ? static_cast<size_t>(m_launchBlocks) * m_launchThreads / m_data.scryptChachaThreadsPerWU()
+        : m_data.scryptChachaTheoreticalWorkUnits();
     if (CudaLib::hasScryptChachaWorkUnits()) {
         uint32_t wu = 0;
         if (CudaLib::scryptChachaWorkUnits(m_ctx, &wu)) {
@@ -70,10 +85,19 @@ bool xmrig::CudaScryptChachaRunner::init()
     size_t vramBytes = 0, ramBytes = 0, totalBytes = 0;
     m_data.scryptChachaMemorySplit(ramWarps, m_workUnits, vramBytes, ramBytes, totalBytes);
 
-    LOG_INFO("%s" CYAN_BOLD(" #%u") " scrypt-chacha CUDA ready: %u work units allocated (theoretical %zu, VRAM %zu MiB + RAM %zu MiB, lookup_gap %d, system_ram %s)",
-                cuda_tag(), m_data.thread.index(), m_workUnits, theoretical,
-                vramBytes / oneMiB, ramBytes / oneMiB,
-                m_data.scryptchacha_lookup_gap, m_data.scryptchacha_use_system_ram ? "on" : "off");
+    m_vramScratchpadBytes = vramBytes;
+    m_ramScratchpadBytes  = ramBytes;
+
+    // Authoritative post-back-off allocation summary. One skeleton shared
+    // with the OpenCL backend's ready line ("N work units, VRAM X MiB + RAM
+    // Y MiB (T MiB total)"), followed by this backend's native geometry: the
+    // final blocks x threads launch config. Any back-off from the theoretical
+    // count is reported by the differs-warning above, and the tuning knobs by
+    // the verbose tuning line, so neither repeats here.
+    LOG_INFO("%s" CYAN_BOLD(" #%u") " scrypt-chacha ready: " CYAN_BOLD("%u") " work units, VRAM " CYAN_BOLD("%zu MiB") " + RAM " CYAN_BOLD("%zu MiB") " (" CYAN_BOLD("%zu MiB") " total), launch config " CYAN_BOLD("%ux%u"),
+                cuda_tag(), m_data.thread.index(), m_workUnits,
+                vramBytes / oneMiB, ramBytes / oneMiB, totalBytes / oneMiB,
+                m_launchBlocks, m_launchThreads);
 
     return true;
 }
@@ -92,7 +116,10 @@ void xmrig::CudaScryptChachaRunner::configureCtx()
             m_data.scryptchacha_reserve_vram_mb,
             m_data.scryptchacha_host_ram_budget_mb);
 
-        LOG_VERBOSE("%s" CYAN_BOLD(" #%u") " scrypt-chacha CUDA tuning: lookup_gap %d, system_ram %s, reserve_vram %d MiB, host_ram_budget %d MiB",
+        // Effective per-GPU tuning this runner mines with. Printed at runner
+        // init on both GPU backends in the same shape; the OpenCL line adds a
+        // worksize field because that knob is OpenCL-only.
+        LOG_VERBOSE("%s" CYAN_BOLD(" #%u") " scrypt-chacha tuning: lookup_gap %d, system_ram %s, reserve_vram %d MiB, host_ram_budget %d MiB",
                     cuda_tag(), m_data.thread.index(), m_data.scryptchacha_lookup_gap,
                     m_data.scryptchacha_use_system_ram ? "on" : "off",
                     m_data.scryptchacha_reserve_vram_mb, m_data.scryptchacha_host_ram_budget_mb);

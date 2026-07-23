@@ -41,7 +41,18 @@ bool xmrig::CudaLaunchData::isEqual(const CudaLaunchData &other) const
 {
     return (other.algorithm.family() == algorithm.family() &&
             other.algorithm.l3()     == algorithm.l3() &&
-            other.thread             == thread);
+            other.thread             == thread
+#           ifdef XMRIG_ALGO_SCRYPT_CHACHA
+            // The merged per-GPU tuning is part of the launch identity, like
+            // on the OpenCL launch data: a global-knob change that shifts a
+            // merged value must make setJob recreate the workers even though
+            // the thread itself (which stores only pins) is unchanged.
+            && other.scryptchacha_lookup_gap         == scryptchacha_lookup_gap
+            && other.scryptchacha_use_system_ram     == scryptchacha_use_system_ram
+            && other.scryptchacha_reserve_vram_mb    == scryptchacha_reserve_vram_mb
+            && other.scryptchacha_host_ram_budget_mb == scryptchacha_host_ram_budget_mb
+#           endif
+            );
 }
 
 
@@ -68,7 +79,7 @@ void xmrig::CudaLaunchData::scryptChachaMemorySplit(size_t ramWarps, size_t work
 {
     const int    lookup_gap  = scryptchacha_lookup_gap > 0 ? scryptchacha_lookup_gap : 1;
     const size_t wu_per_warp = 32 / scryptChachaThreadsPerWU();                       // 32 on Volta, 8 on Pascal
-    const size_t per_warp    = wu_per_warp * (scrypt_chacha::kScratchpadBytes / static_cast<size_t>(lookup_gap));
+    const size_t per_warp    = wu_per_warp * scrypt_chacha::perWorkUnitScratchpadBytes(static_cast<uint32_t>(lookup_gap));
     const size_t total_warps = wu_per_warp ? workUnits / wu_per_warp : 0;
 
     // The host-mapped warp count is the plugin's figure (the host-RAM-adaptive

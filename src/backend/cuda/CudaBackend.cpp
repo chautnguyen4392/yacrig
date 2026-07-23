@@ -254,26 +254,21 @@ public:
 
 
 #   ifdef XMRIG_ALGO_SCRYPT_CHACHA
-    // Per-device launch table for scrypt-chacha. The per-hash scratchpad is
-    // not Algorithm::l3() (a sentinel 1 for this family): it is
+    // Profile line and per-device launch table for scrypt-chacha, printed
+    // from the all-workers-ready callback: by then every runner has
+    // initialized, so WORK UNITS / THREADS / BLOCKS are the real launch
+    // geometry (covering auto (-1/-1) threads, which the plugin sizes at
+    // runner init) and the VRAM / RAM split is the allocation the runner
+    // actually made (post back-off), never an estimate. The per-hash
+    // scratchpad is not Algorithm::l3() (a sentinel 1 for this family): it is
     // kScratchpadBytes per work unit at lookup_gap 1, scaled down by the
-    // configured lookup_gap. bfactor / bsleep do not apply, so the table
-    // reports the lookup_gap and the VRAM / system-RAM scratchpad split in
-    // their place.
-    //
-    // The VRAM / RAM split is the autotune's estimate, computed by the same
-    // host-RAM-adaptive reserve the plugin uses (CudaLaunchData::
-    // scryptChachaMemoryEstimate), so this table agrees with the plugin's
-    // autotune log line. deviceInit backs the warp count off if the VRAM
-    // allocation falls short, and the runner then logs the work-unit count
-    // actually allocated. NAME is the last column so the variable-width GPU
-    // name never misaligns the fixed columns before it.
-    inline void printScryptChachaProfile() const
+    // configured lookup_gap, so the profile line carries no scratchpad size
+    // and the SCRATCHPAD SIZE column shows the per-device figure.
+    // bfactor / bsleep do not apply to this family. A worker that failed to
+    // start has no row. NAME is the last column so the variable-width GPU
+    // name never misaligns the fixed columns.
+    inline void printScryptChachaLaunch() const
     {
-        // The per-WU scratchpad footprint depends on the per-device lookup_gap
-        // (kScratchpadBytes / lookup_gap), so a single profile-wide value would be
-        // ambiguous when devices differ. The per-device VRAM / RAM / TOTAL MiB and
-        // LOOKUP GAP columns in the table below carry the real footprint instead.
         LOG_INFO("%s use profile " BLUE_BG(WHITE_BOLD_S " %s ") WHITE_BOLD_S " (" CYAN_BOLD("%zu") WHITE_BOLD(" thread%s)"),
                  Tags::nvidia(),
                  profileName.data(),
@@ -281,32 +276,32 @@ public:
                  threads.size() > 1 ? "s" : ""
                  );
 
-        Log::print(WHITE_BOLD("|  # | GPU |  BUS ID | WORK UNITS | THREADS | BLOCKS | LOOKUP GAP | VRAM MiB | RAM MiB | TOTAL MiB | NAME"));
+        Log::print(WHITE_BOLD("|  # | GPU |  BUS ID | LOOKUP GAP | SCRATCHPAD SIZE | WORK UNITS | THREADS | BLOCKS | VRAM MiB | RAM MiB | TOTAL MiB | NAME"));
 
         size_t i = 0;
         for (const auto &data : threads) {
-            const int    lookup_gap = data.scryptchacha_lookup_gap > 0 ? data.scryptchacha_lookup_gap : 1;
-            const size_t work_units = data.scryptChachaTheoreticalWorkUnits();
+            if (i >= scryptChachaRows.size() || !scryptChachaRows[i].valid) {
+                i++;
+                continue;
+            }
 
-            // Autotune estimate. A JSON-pinned thread skips the autotune, so its
-            // RAM warp count is 0 here (the table shows the scratchpad as
-            // all-VRAM): its real split is logged by the runner READY line after
-            // deviceInit. An autotuned thread carries the autotune estimate.
-            size_t vramBytes = 0, ramBytes = 0, totalBytes = 0;
-            data.scryptChachaMemorySplit(data.thread.scryptChachaRamWarps(), work_units, vramBytes, ramBytes, totalBytes);
+            const auto &row = scryptChachaRows[i];
+            const int lookup_gap            = data.scryptchacha_lookup_gap > 0 ? data.scryptchacha_lookup_gap : 1;
+            const uint64_t perWorkUnitBytes = scrypt_chacha::perWorkUnitScratchpadBytes(static_cast<uint32_t>(lookup_gap));
 
-            Log::print("|" CYAN_BOLD("%3zu") " |" CYAN_BOLD("%4u") " |" YELLOW(" %7s") " |" CYAN_BOLD("%11zu") " |" CYAN_BOLD("%8d") " |"
-                       CYAN_BOLD("%7d") " |" CYAN_BOLD("%11d") " |" CYAN("%9zu") " |" CYAN("%8zu") " |" CYAN("%10zu") " | " GREEN_BOLD("%s"),
+            Log::print("|" CYAN_BOLD("%3zu") " |" CYAN_BOLD("%4u") " |" YELLOW(" %7s") " |" CYAN_BOLD("%11d") " |" CYAN("%12" PRIu64 " MiB") " |"
+                       CYAN_BOLD("%11zu") " |" CYAN_BOLD("%8u") " |" CYAN_BOLD("%7u") " |" CYAN("%9" PRIu64) " |" CYAN("%8" PRIu64) " |" CYAN("%10" PRIu64) " | " GREEN_BOLD("%s"),
                        i,
                        data.thread.index(),
                        data.device.topology().toString().data(),
-                       work_units,
-                       data.thread.threads(),
-                       data.thread.blocks(),
                        lookup_gap,
-                       vramBytes / oneMiB,
-                       ramBytes / oneMiB,
-                       totalBytes / oneMiB,
+                       perWorkUnitBytes / oneMiB,
+                       row.workUnits,
+                       row.launchThreads,
+                       row.launchBlocks,
+                       row.vramBytes / oneMiB,
+                       row.ramBytes / oneMiB,
+                       (row.vramBytes + row.ramBytes) / oneMiB,
                        data.device.name().data()
                        );
 
@@ -319,8 +314,11 @@ public:
     inline void start(const Job &job)
     {
 #       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        // The scrypt-chacha profile line and launch table print from the
+        // all-workers-ready callback (printScryptChachaLaunch), where the
+        // final launch geometry and the allocated VRAM / RAM split exist.
         if (algo.family() == Algorithm::SCRYPT_CHACHA) {
-            printScryptChachaProfile();
+            scryptChachaRows.assign(threads.size(), ScryptChachaReadyRow());
         }
         else
 #       endif
@@ -375,6 +373,23 @@ public:
     uint32_t driverVersion      = 0;
     uint32_t runtimeVersion     = 0;
     Workers<CudaLaunchData> workers;
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // One row per worker for the deferred scrypt-chacha launch table, indexed
+    // by worker id (= position in threads) and collected under the callback
+    // mutex as each worker reports ready.
+    struct ScryptChachaReadyRow
+    {
+        bool valid              = false;
+        size_t workUnits        = 0;
+        uint32_t launchThreads  = 0;
+        uint32_t launchBlocks   = 0;
+        uint64_t vramBytes      = 0;
+        uint64_t ramBytes       = 0;
+    };
+
+    std::vector<ScryptChachaReadyRow> scryptChachaRows;
+#   endif
 };
 
 
@@ -552,7 +567,26 @@ void xmrig::CudaBackend::start(IWorker *worker, bool ready)
 {
     mutex.lock();
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Collect this worker's final launch geometry and allocated VRAM / RAM
+    // split for the deferred launch table, printed below once the last
+    // worker arrives.
+    if (ready && d_ptr->algo.family() == Algorithm::SCRYPT_CHACHA && worker->id() < d_ptr->scryptChachaRows.size()) {
+        auto &row     = d_ptr->scryptChachaRows[worker->id()];
+        row.valid     = true;
+        row.workUnits = worker->intensity();
+
+        static_cast<CudaWorker *>(worker)->scryptChachaLaunchInfo(row.launchThreads, row.launchBlocks, row.vramBytes, row.ramBytes);
+    }
+#   endif
+
     if (d_ptr->status.started(ready)) {
+#       ifdef XMRIG_ALGO_SCRYPT_CHACHA
+        if (d_ptr->algo.family() == Algorithm::SCRYPT_CHACHA) {
+            d_ptr->printScryptChachaLaunch();
+        }
+#       endif
+
         d_ptr->status.print();
 
         CudaWorker::ready = true;

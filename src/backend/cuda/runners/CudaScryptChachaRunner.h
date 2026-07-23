@@ -27,6 +27,15 @@ class CudaScryptChachaRunner : public CudaBaseRunner
 public:
     CudaScryptChachaRunner(size_t index, const CudaLaunchData &data);
 
+    // Final launch geometry and allocated scratchpad split, valid once init()
+    // has run (covers auto geometry and any back-off). The backend reads
+    // these through CudaWorker for the launch table it prints when every
+    // worker is ready.
+    inline uint32_t launchThreads() const       { return m_launchThreads; }
+    inline uint32_t launchBlocks() const        { return m_launchBlocks; }
+    inline uint64_t vramScratchpadBytes() const { return m_vramScratchpadBytes; }
+    inline uint64_t ramScratchpadBytes() const  { return m_ramScratchpadBytes; }
+
 protected:
     bool init() override;
     void configureCtx() override;
@@ -44,6 +53,11 @@ private:
     uint8_t *m_jobBlob       = nullptr;
     uint32_t m_workUnits     = 0;
     uint32_t m_skippedHashes = 0;
+
+    uint32_t m_launchThreads        = 0;
+    uint32_t m_launchBlocks         = 0;
+    uint64_t m_vramScratchpadBytes  = 0;
+    uint64_t m_ramScratchpadBytes   = 0;
 };
 
 

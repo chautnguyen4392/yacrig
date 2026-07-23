@@ -37,6 +37,10 @@
 #   include "backend/opencl/cl/kawpow/kawpow_dag_cl.h"
 #endif
 
+#ifdef XMRIG_ALGO_SCRYPT_CHACHA
+#   include "backend/opencl/cl/scrypt/scrypt-chacha_cl.h"
+#endif
+
 
 const char *xmrig::OclSource::get(const Algorithm &algorithm)
 {
@@ -49,6 +53,12 @@ const char *xmrig::OclSource::get(const Algorithm &algorithm)
 #   ifdef XMRIG_ALGO_KAWPOW
     if (algorithm.family() == Algorithm::KAWPOW) {
         return kawpow_dag_cl;
+    }
+#   endif
+
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    if (algorithm.family() == Algorithm::SCRYPT_CHACHA) {
+        return scrypt_chacha_cl;
     }
 #   endif
 

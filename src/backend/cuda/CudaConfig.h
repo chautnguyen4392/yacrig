@@ -87,7 +87,7 @@ private:
     int  m_reserve_vram_mb                    = 0;
     int  m_reserve_ram_mb                     = 4096; // host-level OS reserve, never per-GPU
     int  m_host_ram_budget_mb                 = 4096; // global host-RAM cap for all GPUs, split evenly; 0 = use MemAvailable - reserve_ram_mb
-    int  m_default_host_ram_budget_mb_per_gpu = 0;   // derived in generate(), not parsed
+    int  m_default_host_ram_budget_mb_per_gpu = 0;   // derived in setupScryptChacha(), not parsed
 #   endif
 
 #   ifdef XMRIG_FEATURE_NVML

@@ -63,6 +63,39 @@ void xmrig::OclPlatform::print()
 }
 
 
+// The device-level companion of print(): every GPU device of every platform,
+// with the index that --opencl-devices and the per-device config "index" key
+// select by.
+void xmrig::OclPlatform::printDevices()
+{
+    constexpr size_t oneMiB = 1024 * 1024;
+    const auto platforms = OclPlatform::get();
+
+    printf("%-28s%zu\n\n", "Number of OpenCL platforms:", platforms.size());
+
+    for (const auto &platform : platforms) {
+        const auto devices = platform.devices();
+
+        printf("  %-26s%zu\n",   "Platform index:", platform.index());
+        printf("  %-26s%s\n",    "Name:",           platform.name().data());
+        printf("  %-26s%s\n",    "Version:",        platform.version().data());
+        printf("  %-26s%zu\n\n", "GPU devices:",    devices.size());
+
+        for (const auto &device : devices) {
+            printf("    %-24s%u\n",           "Index:",               device.index());
+            printf("    %-24s%s\n",           "Name:",                device.printableName().data());
+            printf("    %-24s%s\n",           "Bus ID:",              device.topology().toString().data());
+            printf("    %-24s%u MHz\n",       "Clock:",               device.clock());
+            printf("    %-24s%u\n",           "Compute units:",       device.computeUnits());
+            // freeMemSize() is the largest single allocation the runtime
+            // guarantees (min of CL_DEVICE_MAX_MEM_ALLOC_SIZE and total), not
+            // live free memory, so the label says cap, not free.
+            printf("    %-24s%zu/%zu MB\n\n", "Memory (cap/total):", device.freeMemSize() / oneMiB, device.globalMemSize() / oneMiB);
+        }
+    }
+}
+
+
 rapidjson::Value xmrig::OclPlatform::toJSON(rapidjson::Document &doc) const
 {
     using namespace rapidjson;

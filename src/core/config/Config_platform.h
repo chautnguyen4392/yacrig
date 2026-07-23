@@ -146,6 +146,12 @@ static const option options[] = {
     { "opencl-platform",       1, nullptr, IConfig::OclPlatformKey        },
     { "opencl-loader",         1, nullptr, IConfig::OclLoaderKey          },
     { "opencl-no-cache",       0, nullptr, IConfig::OclCacheKey           },
+    { "opencl-lookup-gap",     1, nullptr, IConfig::OclLookupGapKey       },
+    { "opencl-worksize",       1, nullptr, IConfig::OclWorksizeKey        },
+    { "opencl-use-system-ram", 0, nullptr, IConfig::OclUseSystemRamKey    },
+    { "opencl-reserve-vram",   1, nullptr, IConfig::OclReserveVramKey     },
+    { "opencl-reserve-ram",    1, nullptr, IConfig::OclReserveRamKey      },
+    { "opencl-host-ram-budget", 1, nullptr, IConfig::OclHostRamBudgetKey  },
 #   endif
 #   ifdef XMRIG_FEATURE_CUDA
     { "cuda",                  0, nullptr, IConfig::CudaKey               },

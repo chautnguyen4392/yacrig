@@ -38,6 +38,11 @@
 #   include "backend/opencl/wrappers/OclPlatform.h"
 #endif
 
+#ifdef XMRIG_FEATURE_CUDA
+#   include "backend/cuda/wrappers/CudaDevice.h"
+#   include "backend/cuda/wrappers/CudaLib.h"
+#endif
+
 #include "base/kernel/Entry.h"
 #include "base/kernel/Process.h"
 #include "core/config/usage.h"
@@ -209,6 +214,57 @@ static int exportTopology(const Process &)
 #endif
 
 
+#if defined(XMRIG_FEATURE_OPENCL) || defined(XMRIG_FEATURE_CUDA)
+// Prints every GPU each compiled-in backend can see, then exits. Output goes
+// through printf like the other early-exit commands: the log subsystem is not
+// up yet at this point.
+static int printDevices(const Process &process)
+{
+    const Arguments &args = process.arguments();
+
+#   ifdef XMRIG_FEATURE_OPENCL
+    // An explicit --opencl-loader is honored so the same loader resolution
+    // applies as in a mining run; value() returns nullptr when the option is
+    // absent, which selects the default loader.
+    if (OclLib::init(args.value("--opencl-loader"))) {
+        OclPlatform::printDevices();
+    }
+    else {
+        printf("%-28s0 (failed to load the OpenCL runtime)\n\n", "Number of OpenCL platforms:");
+    }
+#   endif
+
+#   ifdef XMRIG_FEATURE_CUDA
+    if (CudaLib::init(args.value("--cuda-loader"))) {
+        constexpr size_t oneMiB = 1024 * 1024;
+        const auto devices = CudaLib::devices(0, 0, {});
+
+        printf("%-28s%s/%s/%s\n", "CUDA driver/runtime/plugin:",
+               CudaLib::version(CudaLib::driverVersion()).c_str(),
+               CudaLib::version(CudaLib::runtimeVersion()).c_str(),
+               CudaLib::pluginVersion());
+        printf("%-28s%zu\n\n", "Number of CUDA devices:", devices.size());
+
+        for (const auto &device : devices) {
+            printf("  %-26s%u\n",           "Index:",               device.index());
+            printf("  %-26s%s\n",           "Name:",                device.name().data());
+            printf("  %-26s%s\n",           "Bus ID:",              device.topology().toString().data());
+            printf("  %-26s%u.%u\n",        "Compute capability:",  device.computeCapability(true), device.computeCapability(false));
+            printf("  %-26s%u/%u MHz\n",    "Clock (core/memory):", device.clock(), device.memoryClock());
+            printf("  %-26s%u\n",           "SMX:",                 device.smx());
+            printf("  %-26s%zu/%zu MB\n\n", "Memory (free/total):", device.freeMemSize() / oneMiB, device.globalMemSize() / oneMiB);
+        }
+    }
+    else {
+        printf("%-28s0 (%s)\n\n", "Number of CUDA devices:", CudaLib::lastError());
+    }
+#   endif
+
+    return 0;
+}
+#endif
+
+
 } // namespace xmrig
 
 
@@ -232,6 +288,12 @@ xmrig::Entry::Id xmrig::Entry::get(const Process &process)
 #   ifdef XMRIG_FEATURE_OPENCL
     if (args.hasArg("--print-platforms")) {
         return Platforms;
+    }
+#   endif
+
+#   if defined(XMRIG_FEATURE_OPENCL) || defined(XMRIG_FEATURE_CUDA)
+    if (args.hasArg("--print-devices")) {
+        return Devices;
     }
 #   endif
 
@@ -266,6 +328,11 @@ int xmrig::Entry::exec(const Process &process, Id id)
             OclPlatform::print();
         }
         return 0;
+#   endif
+
+#   if defined(XMRIG_FEATURE_OPENCL) || defined(XMRIG_FEATURE_CUDA)
+    case Devices:
+        return printDevices(process);
 #   endif
 
 #   ifdef XMRIG_ALGO_SCRYPT_CHACHA

@@ -128,6 +128,12 @@ public:
         OclUnrollKey         = 1409,
         OclCompModeKey       = 1410,
         OclKey               = 1411,
+        OclLookupGapKey      = 1412,
+        OclWorksizeKey       = 1413,
+        OclUseSystemRamKey   = 1414,
+        OclReserveVramKey    = 1415,
+        OclReserveRamKey     = 1416,
+        OclHostRamBudgetKey  = 1417,
 
         // xmrig-proxy
         AccessLogFileKey     = 'A',

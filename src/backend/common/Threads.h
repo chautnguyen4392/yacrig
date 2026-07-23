@@ -45,6 +45,18 @@ public:
     inline void disable(const Algorithm &algo)                                         { m_disabled.insert(algo); }
     inline void setAlias(const Algorithm &algo, const char *profile)                   { m_aliases[algo] = profile; }
 
+    // Mutable access to one parsed profile, for backend-specific post-parse
+    // fix-ups (the OpenCL scrypt-chacha field marker). Returns nullptr when
+    // the profile does not exist.
+    inline T *profile(const String &profileName)
+    {
+        if (profileName.isNull() || !has(profileName)) {
+            return nullptr;
+        }
+
+        return &m_profiles.at(profileName);
+    }
+
     inline size_t move(const char *profile, T &&threads)
     {
         if (has(profile)) {

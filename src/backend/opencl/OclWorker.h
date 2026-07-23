@@ -47,6 +47,15 @@ public:
 
     static std::atomic<bool> ready;
 
+#   ifdef XMRIG_ALGO_SCRYPT_CHACHA
+    // Actual allocated scratchpad split of this worker's runner (valid once
+    // the worker reported ready). Zeroes for every other algorithm family.
+    // OclBackend reads it for the launch table printed at all-workers-ready.
+    // The CUDA twin (CudaWorker::scryptChachaLaunchInfo) additionally carries
+    // the final threads / blocks, geometry OpenCL keeps in its launch data.
+    void scryptChachaLaunchInfo(uint64_t &vramBytes, uint64_t &ramBytes) const;
+#   endif
+
 protected:
     bool selfTest() override;
     size_t intensity() const override;

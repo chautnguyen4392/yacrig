@@ -130,6 +130,42 @@ if (WITH_OPENCL)
              )
     endif()
 
+    if (WITH_SCRYPT_CHACHA)
+        list(APPEND HEADERS_BACKEND_OPENCL
+             src/backend/opencl/cl/scrypt/scrypt-chacha_cl.h
+             src/backend/opencl/generators/ocl_scrypt_chacha_generator.h
+             src/backend/opencl/runners/OclScryptChachaRunner.h
+             )
+
+        list(APPEND SOURCES_BACKEND_OPENCL
+             src/backend/opencl/generators/ocl_scrypt_chacha_generator.cpp
+             src/backend/opencl/runners/OclScryptChachaRunner.cpp
+             )
+
+        # Standalone golden-vector harness for the OpenCL kernel. It is not part
+        # of the miner: it uses the bundled CL headers (src/3rdparty/CL) and links
+        # the OpenCL ICD loader directly, so it builds on any host that has a
+        # libOpenCL.so (i.e. a GPU driver), without an OpenCL -dev package. The
+        # target is skipped when no loader is found (e.g. a GPU-less CI box).
+        # Build and run with:
+        #     make scrypt_chacha_test_ocl && ./scrypt_chacha_test_ocl
+        find_library(OPENCL_LOADER_LIB NAMES OpenCL)
+        if (OPENCL_LOADER_LIB)
+            add_executable(scrypt_chacha_test_ocl
+                src/backend/opencl/cl/scrypt/scrypt_chacha_test_ocl.cpp)
+            target_include_directories(scrypt_chacha_test_ocl PRIVATE src src/3rdparty)
+            target_link_libraries(scrypt_chacha_test_ocl ${OPENCL_LOADER_LIB})
+            # CL_TARGET_OPENCL_VERSION is inherited from the global OpenCL
+            # definitions; the source supplies a 1.2 fallback if it is unset.
+            # CL_USE_DEPRECATED_OPENCL_1_2_APIS keeps clCreateCommandQueue (a
+            # 1.2 entry point) warning-free at higher target versions.
+            target_compile_definitions(scrypt_chacha_test_ocl PRIVATE
+                XMRIG_ALGO_SCRYPT_CHACHA
+                CL_USE_DEPRECATED_OPENCL_1_2_APIS
+                SCRYPT_CHACHA_CL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/backend/opencl/cl/scrypt/scrypt-chacha.cl")
+        endif()
+    endif()
+
     if (WITH_STRICT_CACHE)
         add_definitions(/DXMRIG_STRICT_OPENCL_CACHE)
     else()
