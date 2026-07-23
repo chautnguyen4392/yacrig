@@ -1,8 +1,8 @@
 # YACRig
 
-YACRig is a CPU and NVIDIA GPU miner for [Yacoin](https://github.com/yacoin/yacoin) (YAC), implementing the scrypt-chacha proof-of-work and `getwork` JSON-RPC against a local `yacoind`.
+YACRig is a CPU, NVIDIA GPU, and AMD GPU miner for [Yacoin](https://github.com/yacoin/yacoin) (YAC), implementing the scrypt-chacha proof-of-work and `getwork` JSON-RPC against a local `yacoind`.
 
-YACRig is a fork of [XMRig](https://github.com/xmrig/xmrig) v6.25.0. The mining engine, autotuner, OpenCL/CUDA backends, configuration system, and CLI conventions all come from XMRig. The scrypt-chacha kernel (vendored from [`scrypt-jane`](https://github.com/floodyberry/scrypt-jane)), the `YacGetworkClient` that speaks to yacoind, the YAC `Coin` / `Algorithm` registrations, and the YAC-aware autotuner are the additions made here.
+YACRig is a fork of [XMRig](https://github.com/xmrig/xmrig) v6.25.0. The mining engine, autotuner, OpenCL/CUDA backends, configuration system, and CLI conventions all come from XMRig. The CPU scrypt-chacha kernel (vendored from [`scrypt-jane`](https://github.com/floodyberry/scrypt-jane)), the OpenCL scrypt-chacha kernel (ported from [YACMiner](https://github.com/Thirtybird/YACMiner)), the `YacGetworkClient` that speaks to yacoind, the YAC `Coin` / `Algorithm` registrations, and the YAC-aware autotuner are the additions made here.
 
 ## Table of contents
 
@@ -14,13 +14,14 @@ YACRig is a fork of [XMRig](https://github.com/xmrig/xmrig) v6.25.0. The mining 
   - [4.2 Basic commandline options](#42-basic-commandline-options)
   - [4.3 Concrete example](#43-concrete-example)
   - [4.4 Mining on an NVIDIA GPU](#44-mining-on-an-nvidia-gpu)
+  - [4.5 Mining on an AMD GPU](#45-mining-on-an-amd-gpu)
 - [5. What YACRig changes from XMRig](#5-what-yacrig-changes-from-xmrig)
 - [6. License](#6-license)
 - [7. Acknowledgements](#7-acknowledgements)
 
 ## 1. Status
 
-Alpha. CPU mining and NVIDIA GPU mining (via the [yacrig-cuda](https://github.com/chautnguyen4392/yacrig-cuda) plugin) both work end-to-end against `yacoind`. AMD GPU support and Stratum pool support are not yet implemented for YAC.
+Alpha. CPU mining, NVIDIA GPU mining (via the [yacrig-cuda](https://github.com/chautnguyen4392/yacrig-cuda) plugin), and AMD GPU mining (built into the `yacrig` binary, no plugin) all work end-to-end against `yacoind`. Stratum pool support is not yet implemented for YAC.
 
 ## 2. Prerequisites
 
@@ -29,23 +30,31 @@ YACRig is tested on Ubuntu 20.04 / 22.04. Install the build dependencies with:
 ```bash
 sudo apt-get install -y \
     build-essential cmake git automake libtool autoconf pkg-config \
-    libuv1-dev libssl-dev libhwloc-dev
+    libuv1-dev libssl-dev libhwloc-dev \
+    ocl-icd-opencl-dev opencl-headers
 ```
 
 A C++17-capable compiler is required (gcc 9+ or clang 10+). Other Linux distributions work with equivalent packages.
 
+The last two packages are the OpenCL headers and ICD loader, needed to build the AMD GPU backend. Drop them if you build with `-DWITH_OPENCL=OFF`.
+
 ## 3. Build
 
-The default build covers CPU mining, NVIDIA GPU mining, or both. From the repository root:
+The default build covers CPU mining, NVIDIA GPU mining, AMD GPU mining, or any combination. From the repository root:
 
 ```bash
 cmake -S . -B build
 cd build && make -j$(nproc)
 ```
 
-The scrypt-chacha algorithm, the CUDA backend, and HTTP support are all enabled by default, so no extra flags are needed.
+The scrypt-chacha algorithm, the CUDA and OpenCL backends, and HTTP support are all enabled by default, so no extra flags are needed.
 
-The CUDA backend compiles only a runtime loader and does not pull in the CUDA Toolkit, so the same binary supports NVIDIA GPU mining. To actually mine on an NVIDIA GPU you also need the separate [yacrig-cuda](https://github.com/chautnguyen4392/yacrig-cuda) plugin (`libyacrig-cuda.so`), which holds the CUDA kernels. See the [yacrig-cuda README](https://github.com/chautnguyen4392/yacrig-cuda) for its driver/toolkit requirements and build steps, and [`doc/YAC_CUDA_MINING.md`](doc/YAC_CUDA_MINING.md) for the full GPU walkthrough (building, tuning, measured hashrate). The individual CMake flags are documented in the build sections of [`doc/YAC_CPU_MINING.md`](doc/YAC_CPU_MINING.md) and [`doc/YAC_CUDA_MINING.md`](doc/YAC_CUDA_MINING.md).
+Neither GPU backend needs a GPU toolkit at build time, and neither needs a GPU on the build machine. They differ in what they need at mining time:
+
+- **NVIDIA.** The CUDA backend compiles only a runtime loader and does not pull in the CUDA Toolkit. To actually mine on an NVIDIA GPU you also need the separate [yacrig-cuda](https://github.com/chautnguyen4392/yacrig-cuda) plugin (`libyacrig-cuda.so`), which holds the CUDA kernels. See the [yacrig-cuda README](https://github.com/chautnguyen4392/yacrig-cuda) for its driver/toolkit requirements and build steps.
+- **AMD.** The OpenCL backend is compiled into the `yacrig` binary itself, and its kernel is OpenCL C source that the driver compiles at runtime for the exact card it runs on. There is no plugin and no second binary: an AMD driver providing an OpenCL implementation, plus the `libOpenCL.so` ICD loader, is the whole runtime requirement.
+
+The full GPU walkthroughs, covering driver setup, tuning, and measured hashrate, are in [`doc/YAC_CUDA_MINING.md`](doc/YAC_CUDA_MINING.md) and [`doc/YAC_OPENCL_MINING.md`](doc/YAC_OPENCL_MINING.md). The individual CMake flags are documented in the build sections of those two and of [`doc/YAC_CPU_MINING.md`](doc/YAC_CPU_MINING.md).
 
 A successful build leaves a `yacrig` binary inside `build/`. Verify it with the built-in self-test:
 
@@ -142,11 +151,38 @@ The plugin autotunes each card to fill its VRAM, so `--cuda` alone is enough to 
 
 The full NVIDIA GPU walkthrough, including the driver/toolkit setup, the per-device tuning knobs, and measured hashrate on tested cards, is in [`doc/YAC_CUDA_MINING.md`](doc/YAC_CUDA_MINING.md).
 
+### 4.5 Mining on an AMD GPU
+
+With an AMD driver installed (see [`doc/YAC_OPENCL_MINING.md`](doc/YAC_OPENCL_MINING.md) for the per-card driver matrix), add `--opencl` to any of the commands above. No plugin file is involved:
+
+```bash
+# GPU + CPU together (the autotuner sizes both backends)
+./yacrig --coin=yac --daemon -o <host>:<rpcport> -u <rpcuser> -p <rpcpassword> --opencl
+
+# GPU only, spilling scratchpads into host RAM for a large gain
+./yacrig --coin=yac --daemon -o <host>:<rpcport> -u <rpcuser> -p <rpcpassword> \
+         --opencl --no-cpu --opencl-lookup-gap=32 --opencl-worksize=64 \
+         --opencl-use-system-ram --opencl-host-ram-budget=24576 --verbose
+```
+
+The autotuner fills each card's free VRAM, so `--opencl` alone is enough to start. Run `./yacrig --print-devices` first if you want to confirm the driver sees your card. The most common GPU options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--opencl` | off | Enable the OpenCL backend. **Required** to mine on the AMD GPU. |
+| `--no-cpu` | off | Mine on the GPU only. Drop it to run GPU and CPU together. |
+| `--opencl-lookup-gap=N` | `32` | Scratchpad/compute trade-off. Lower values store more of the scratchpad, higher values recompute more of it. |
+| `--opencl-worksize=N` | `32` | OpenCL work-group size. `64` is the value to reach for once host RAM is in play. |
+| `--opencl-use-system-ram` | off | Spill scratchpads into host RAM past the VRAM ceiling. The single largest hashrate lever on a 12 GB card. |
+| `--opencl-host-ram-budget=<MiB>` | `4096` (MiB) | Total host RAM for scratchpads across all AMD GPUs, split evenly. Worth raising a long way past the default. |
+
+External RAM is what makes or breaks AMD hashrate: on a tested RX 6700 XT it is worth 2.9x to 4x over the VRAM-only defaults, and the budget it peaks at depends on the machine's PCIe link. The full AMD GPU walkthrough, including the driver setup, every tuning knob, and measured hashrate across two PCIe generations, is in [`doc/YAC_OPENCL_MINING.md`](doc/YAC_OPENCL_MINING.md).
+
 ## 5. What YACRig changes from XMRig
 
 User-visible:
 
-- New `--coin=yac` selector and `--scrypt-chacha-test` commandline option.
+- New `--coin=yac` selector, `--scrypt-chacha-test` self-test, and `--print-devices` GPU listing.
 - Binary is named `yacrig`, banner says `YACRig 0.1.0`, default data directory is `~/.yacrig/`.
 - Donation strategy is forced off whenever a YAC pool is configured (the upstream dev pool can't accept YAC `getwork` shares).
 - URL references to `xmrig.com` in user-visible text have been stripped.
@@ -166,8 +202,9 @@ YACRig stands on the shoulders of:
 
 - [XMRig](https://github.com/xmrig/xmrig): the CPU/GPU mining engine and most of the surrounding infrastructure.
 - [scrypt-jane](https://github.com/floodyberry/scrypt-jane): the scrypt-chacha kernel.
+- [YACMiner](https://github.com/Thirtybird/YACMiner): the OpenCL scrypt-chacha kernel the AMD GPU backend is ported from.
 - [Yacoin](https://github.com/yacoin/yacoin): the coin itself, its scrypt-chacha parameters, and the `getwork` RPC YACRig consumes.
 
-Thanks to the authors of all three.
+Thanks to the authors of all four.
 
 The original XMRig README is preserved as [`UPSTREAM_README.md`](UPSTREAM_README.md) for reference.

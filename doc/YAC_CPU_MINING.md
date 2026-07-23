@@ -47,7 +47,7 @@ Everything a user needs to mine YAC on a CPU end-to-end:
 - **Solo mining via `getwork`** is supported. YACRig talks directly to a local `yacoind` you control over HTTP JSON-RPC.
 - **Solo mining via `getblocktemplate`** (the newer BIP 22/23 daemon RPC) is **not supported yet** and is planned for a future release.
 - **Pool mining via Stratum** is **not supported yet** and is planned for a future release.
-- **GPU mining (NVIDIA / AMD)** is **not supported yet** for YAC and is planned for a future release.
+- **GPU mining** is supported and has its own guides: [`YAC_CUDA_MINING.md`](./YAC_CUDA_MINING.md) for NVIDIA GPUs and [`YAC_OPENCL_MINING.md`](./YAC_OPENCL_MINING.md) for AMD GPUs.
 
 **Not covered**
 
@@ -396,7 +396,7 @@ The numbers are the steady-state hashrate read from the `miner speed 60s` column
 
 12 cores / 24 hardware threads.
 
-| `--threads` value | Worker count | Scratchpad RAM used | Hashrate (H/s) | Notes |
+| `--threads` value | Worker count | RAM usage | Hashrate (H/s) | Notes |
 |-------------|--------------|---------------------|----------------|-------|
 | autotuned | 12 | 12 × 512 MiB = 6 GiB | 10.0 | Autotuner default (one worker per physical core). |
 | 18 | 18 | 18 × 512 MiB = 9 GiB | 12.5 | Past the core count, extra workers start running on each core's second SMT hardware thread. While one worker on the core is stalled waiting for scratchpad memory, the other can use the core's execution units, so hashrate keeps increasing. |
@@ -407,7 +407,7 @@ The numbers are the steady-state hashrate read from the `miner speed 60s` column
 
 12 cores / 16 hardware threads (hybrid: 4 P-cores with Hyper-threading + 8 E-cores).
 
-| `--threads` value | Worker count | Scratchpad RAM used | Hashrate (H/s) | Notes |
+| `--threads` value | Worker count | RAM usage | Hashrate (H/s) | Notes |
 |-------------|--------------|---------------------|----------------|-------|
 | autotuned | 12 | 12 × 512 MiB = 6 GiB | 7.3 | Autotuner default (one worker per physical core). |
 | 8 | 8 | 8 × 512 MiB = 4 GiB | 5.7 | Below the physical-core count, so several cores sit idle and hashrate drops. |

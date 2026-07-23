@@ -2,7 +2,7 @@
 
 This document is the single user-facing reference for mining [Yacoin](https://github.com/yacoin/yacoin) (YAC) on an NVIDIA GPU with YACRig. It covers building the miner and its CUDA plugin, connecting to a `yacoind` instance, tuning the NVIDIA GPU for your hardware, and interpreting the output.
 
-The title says "CUDA" rather than "GPU" deliberately: this path uses the NVIDIA CUDA toolchain only. AMD GPU support (OpenCL) is planned for a later milestone and will get its own document.
+The title says "CUDA" rather than "GPU" deliberately: this path uses the NVIDIA CUDA toolchain only. AMD GPUs use the separate OpenCL path, documented in [`YAC_OPENCL_MINING.md`](./YAC_OPENCL_MINING.md).
 
 For mining on a CPU instead, see [`YAC_CPU_MINING.md`](./YAC_CPU_MINING.md). The daemon-connection, log-reading, and interactive-command material is shared between the two, so this document cross-references the CPU guide for those parts and focuses on what is specific to NVIDIA GPUs.
 
@@ -54,7 +54,8 @@ Everything needed to mine YAC on an NVIDIA GPU end-to-end:
 - **Solo mining via `getwork`** is the supported connection mode, the same as the CPU path.
 - **NVIDIA GPU and CPU can mine at the same time.** They draw non-overlapping nonce ranges from a shared per-job counter, so a mixed run does no duplicate work.
 - **Multi-GPU** is supported. Each card gets its own runner context and is driven in parallel.
-- **AMD GPUs**, **Stratum pool mining**, and **`getblocktemplate`** are not supported yet.
+- **AMD GPUs** are supported through the separate OpenCL path, documented in [`YAC_OPENCL_MINING.md`](./YAC_OPENCL_MINING.md).
+- **Stratum pool mining** and **`getblocktemplate`** are not supported yet.
 
 **Not covered**
 
@@ -129,10 +130,24 @@ Two checks confirm the NVIDIA GPU path is wired up.
 **1. The plugin enumerates your NVIDIA GPUs.** Point YACRig at the plugin and ask it to print the detected CUDA devices:
 
 ```bash
-./yacrig --cuda --cuda-loader=/path/to/libyacrig-cuda.so --print-platforms
+./yacrig --print-devices --cuda-loader=/path/to/libyacrig-cuda.so
 ```
 
-YACRig prints one line per detected NVIDIA GPU (name, compute capability, memory). If it prints `CUDA disabled` or lists no devices, see [section 7](#7-troubleshooting). If `libyacrig-cuda.so` sits next to the `yacrig` binary, `--cuda-loader` can be omitted (it is the default search path).
+Example result:
+```
+CUDA driver/runtime/plugin: 13.0/12.6/0.1.0
+Number of CUDA devices:     1
+
+  Index:                    0
+  Name:                     NVIDIA GeForce RTX 3060
+  Bus ID:                   00:07.0
+  Compute capability:       8.6
+  Clock (core/memory):      1837/7501 MHz
+  SMX:                      28
+  Memory (free/total):      11795/11909 MB
+```
+
+YACRig prints the plugin's driver/runtime/plugin versions and one entry per detected NVIDIA GPU (index, name, bus ID, compute capability, clocks, SMX count, memory). The `Index` value is the device index used by `--cuda-devices` and the per-device `"index"` key ([section 4.6](#46-per-device-tuning-with-json)). If it reports `Number of CUDA devices: 0`, the reason prints in parentheses on the same line (a wrong loader path shows the exact load error), see [section 7](#7-troubleshooting). If `libyacrig-cuda.so` sits next to the `yacrig` binary, `--cuda-loader` can be omitted (it is the default search path).
 
 **2. The kernels are bit-correct.** The plugin ships a standalone NVIDIA GPU correctness harness (`scrypt_chacha_kernel_test`, built when the yacrig source is checked out next to the plugin). It runs both kernel families against the same golden YAC block headers the CPU self-test uses and prints `all 4 test(s) passed` on success. Running it on a new card before trusting hashrate numbers confirms the kernels produce exactly the bytes the YAC network expects, so any later "rejected share" issue is network- or daemon-side, not kernel-side.
 
@@ -445,6 +460,7 @@ The per-launch `processed ... H/s` line is the most reliable read of NVIDIA GPU 
 
 Confirm, in order:
 
+- `./yacrig --print-devices --cuda-loader=<path>` shows what the plugin itself reports. When it cannot load the plugin, the exact load error prints in parentheses after `Number of CUDA devices: 0`.
 - `nvidia-smi` works and lists your card.
 - `--cuda-loader` points at the real `libyacrig-cuda.so` (or it sits next to the `yacrig` binary).
 - The driver matches or exceeds the CUDA Toolkit the plugin was built against.
@@ -493,5 +509,6 @@ These are the NVIDIA GPU-specific options. They sit on top of the shared network
 | `--cuda-reserve-vram=N` | `"reserve_vram_mb"` | 0 | VRAM (MiB) left free per NVIDIA GPU. The autotuner reserves adaptively on its own, so set this only when another process needs VRAM. |
 | `--cuda-reserve-ram=N` | `"reserve_ram_mb"` | 4096 | Host RAM (MiB) left for the OS, caps external-RAM use. |
 | `--cuda-host-ram-budget=N` | `"host_ram_budget_mb"` | 4096 | Total host RAM (MiB) for scratchpads across all NVIDIA GPUs, split evenly (0 = MemAvailable - reserve-ram). |
+| `--print-devices` | | | Print the GPU devices of every compiled-in GPU backend (CUDA and OpenCL), then exit. Honors `--cuda-loader`. |
 
 Per-device override keys (on each `"scrypt-chacha"` array entry): `lookup_gap`, `use_system_ram`, `reserve_vram_mb`, `host_ram_budget_mb`. See [section 4.6](#46-per-device-tuning-with-json).
